@@ -49,6 +49,75 @@ static bool test_init_array_runs_constructors(void)
     return true;
 }
 
+static int g_preinit_ran_first;
+static int g_preinit_seen_by_init;
+
+static void preinit_fn(int argc, char **argv, char **envp)
+{
+    (void)argc; (void)argv; (void)envp;
+    g_preinit_ran_first = (g_init_count == 0);
+}
+static void (*const preinit_entry)(int, char **, char **)
+    __attribute__((section(".preinit_array"), used)) = preinit_fn;
+
+static void init_note_preinit(void) __attribute__((constructor(101)));
+static void init_note_preinit(void) { g_preinit_seen_by_init = g_preinit_ran_first; }
+
+static volatile int g_fini_trace;
+
+static void fini_late(void)  __attribute__((destructor));
+static void fini_mid(void)   __attribute__((destructor(200)));
+static void fini_early(void) __attribute__((destructor(150)));
+
+static void fini_late(void)  { if (g_fini_trace) putchar('3', SIOOUT); }
+static void fini_mid(void)   { if (g_fini_trace) putchar('2', SIOOUT); }
+static void fini_early(void) { if (g_fini_trace) putchar('1', SIOOUT); }
+
+static bool test_preinit_array_runs_before_init_array(void)
+{
+    ASSERT(g_preinit_ran_first == 1);
+    ASSERT(g_preinit_seen_by_init == 1);
+    return true;
+}
+
+static void atexit_mark(void) { if (g_fini_trace) putchar('A', SIOOUT); }
+
+static int child_exit_runs_destructors(void *arg)
+{
+    (void)arg;
+    g_fini_trace = 1;
+    atexit(atexit_mark);
+    exit(5);
+    return 0;
+}
+
+static int child_underscore_exit_skips_destructors(void *arg)
+{
+    (void)arg;
+    g_fini_trace = 1;
+    _exit(6);
+    return 0;
+}
+
+static bool test_fini_array_runs_destructors_at_exit(void)
+{
+    static char out[32];
+    capture_t cap;
+
+    ASSERT(capture_begin(&cap, 1));
+    int st = run_in_child(child_exit_runs_destructors, nullptr);
+    capture_end(&cap, out, sizeof(out));
+    ASSERT(st == 5);
+    ASSERT_STR_EQ(out, "A321");
+
+    ASSERT(capture_begin(&cap, 1));
+    st = run_in_child(child_underscore_exit_skips_destructors, nullptr);
+    capture_end(&cap, out, sizeof(out));
+    ASSERT(st == 6);
+    ASSERT_STR_EQ(out, "");
+    return true;
+}
+
 static bool test_init_array_receives_arguments(void)
 {
     ASSERT(g_init_argc >= 1 && g_init_argv != nullptr && g_init_argv[g_init_argc] == nullptr);
@@ -578,6 +647,10 @@ static void run_sys_tests(void)
 #if defined(__linux__) || defined(__FreeBSD__)
     RUN_TEST(test_init_array_runs_constructors);
     RUN_TEST(test_init_array_receives_arguments);
+    RUN_TEST(test_preinit_array_runs_before_init_array);
+#endif
+#if defined(__linux__)
+    RUN_TEST(test_fini_array_runs_destructors_at_exit);
 #endif
 
     RUN_TEST(test_signal_set_and_raise);

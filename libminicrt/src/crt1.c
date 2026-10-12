@@ -15,12 +15,16 @@ extern void xxc_io_init(void);
 
 #ifdef _WIN32
 #include <windows.h>
+#include <pe_initfini.h>
 
 XXC_NORETURN void pluspluscBoot(int argc, char **argv)
 {
     sio_init(STD_OUTPUT_HANDLE, STD_ERROR_HANDLE);
 
     xxc_io_init(); 
+
+    __xxc_fini_hook = xxc_pe_run_dtors;
+    xxc_pe_run_ctors();
 
     parr_t args = parr_new((const void**)argv, (size_t)argc);
 
@@ -36,32 +40,89 @@ XXC_NORETURN void pluspluscBoot(int argc, char **argv)
 #elif defined(XXC_RAWSYS)
 #include <xxc_sys.h>
 
-extern void (*__init_array_start[])(int, char **, char **) __attribute__((weak));
-extern void (*__init_array_end[])(int, char **, char **) __attribute__((weak));
+typedef void (*xxc_init_fn)(int, char **, char **);
+typedef void (*xxc_fini_fn)(void);
 
-static void run_init_array(int argc, char **argv)
+extern xxc_init_fn __preinit_array_start[] __attribute__((weak));
+extern xxc_init_fn __preinit_array_end[]   __attribute__((weak));
+extern xxc_init_fn __init_array_start[]    __attribute__((weak));
+extern xxc_init_fn __init_array_end[]      __attribute__((weak));
+extern xxc_fini_fn __fini_array_start[]    __attribute__((weak));
+extern xxc_fini_fn __fini_array_end[]      __attribute__((weak));
+
+static int          g_boot_argc;
+static char       **g_boot_argv;
+
+enum { ARR_PREINIT = 0, ARR_INIT = 1, ARR_FINI = 2 };
+
+static void run_init_array(int which, int argc, char **argv)
 {
     /* GCOV_EXCL_START */
+    void **fns = nullptr;
+    size_t n = 0;
+
     if (__xxc_dynamic_linked)
     {
-        __xxc_run_exe_init_array(argc, argv);
-        return;
+        n = __xxc_exe_dyn_array(which, argc, argv, &fns);
     }
-
-    if (__init_array_start == nullptr || __init_array_end == nullptr)
-        return;
+    else
+    {
+        xxc_init_fn *b = which == ARR_PREINIT ? __preinit_array_start : __init_array_start;
+        xxc_init_fn *e = which == ARR_PREINIT ? __preinit_array_end   : __init_array_end;
+        if (b == nullptr || e == nullptr)
+            return;
+        fns = (void **)b;
+        n = (size_t)(e - b);
+    }
     /* GCOV_EXCL_STOP */
 
-    for (void (**f)(int, char **, char **) = __init_array_start; f < __init_array_end; f++)
-        (*f)(argc, argv, __xxc_environ);
+    for (size_t i = 0; i < n; i++)
+    {
+        if (fns[i] == nullptr || fns[i] == (void *)(uintptr_t)-1)
+            continue;
+        ((xxc_init_fn)fns[i])(argc, argv, __xxc_environ);
+    }
 }
 
-XXC_NORETURN void pluspluscBoot(int argc, char **argv)
+static void run_fini(void)
+{
+    /* GCOV_EXCL_START */
+    void **fns = nullptr;
+    size_t n = 0;
+
+    if (__xxc_dynamic_linked)
+    {
+        n = __xxc_exe_dyn_array(ARR_FINI, g_boot_argc, g_boot_argv, &fns);
+    }
+    else if (__fini_array_start != nullptr && __fini_array_end != nullptr)
+    {
+        fns = (void **)__fini_array_start;
+        n = (size_t)(__fini_array_end - __fini_array_start);
+    }
+    /* GCOV_EXCL_STOP */
+
+    while (n > 0)
+    {
+        void *f = fns[--n];
+        if (f == nullptr || f == (void *)(uintptr_t)-1)
+            continue;
+        ((xxc_fini_fn)f)();
+    }
+}
+
+XXC_NORETURN XXC_NO_SSP void pluspluscBoot(int argc, char **argv)
 {
     __xxc_platform_init(argc, argv);
     sio_init(0, 0);
     xxc_io_init();
-    run_init_array(argc, argv);
+
+    g_boot_argc = argc;
+    g_boot_argv = argv;
+    __xxc_fini_hook = run_fini;
+
+    run_init_array(ARR_PREINIT, argc, argv);
+    run_init_array(ARR_INIT, argc, argv);
+
     parr_t args = parr_new((const void**)argv, (size_t)argc);
     int ret = program(args);
     parr_free(&args);

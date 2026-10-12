@@ -39,7 +39,7 @@ else()
 endif()
 
 if (WIN32 AND (XXC_TESTS_USES_SHARED OR XXC_DEMO_USES_SHARED))
-    set(XXC_EXEC_STARTUP "${CMAKE_CURRENT_SOURCE_DIR}/libminicrt/src/crt1.c")
+    set(XXC_EXEC_STARTUP "${CMAKE_CURRENT_SOURCE_DIR}/libminicrt/src/crt1.c" $<TARGET_OBJECTS:xxc_ssp>)
 else()
     set(XXC_EXEC_STARTUP)
 endif()
@@ -83,6 +83,8 @@ if (XXC_BUILD_TEST)
 
     xxc_add_test(test         test/test.ppc)
     xxc_add_test(leak_test    test/leak.ppc)
+    xxc_add_test(initfini_test test/initfini.ppc)
+    xxc_add_test(stackframe_test test/stackframe.ppc)
 endif()
 
 if (XXC_BUILD_DEMO)
@@ -97,6 +99,7 @@ if (XXC_BUILD_DEMO)
     set_source_files_properties(
         "${CMAKE_CURRENT_SOURCE_DIR}/examples/app-demo.ppc"
         "${CMAKE_CURRENT_SOURCE_DIR}/examples/socket-demo.ppc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/examples/http-demo.ppc"
         PROPERTIES LANGUAGE C
     )
 
@@ -131,6 +134,22 @@ if (XXC_BUILD_DEMO)
 
     xxc_freestanding_compile_options(xxc_demo_socket PRIVATE)
     xxc_freestanding_link_options(xxc_demo_socket)
+
+    add_executable(xxc_demo_http "${CMAKE_CURRENT_SOURCE_DIR}/examples/http-demo.ppc" ${XXC_EXEC_STARTUP} ${XXC_EXEC_CRT0})
+    set_target_properties(xxc_demo_http PROPERTIES OUTPUT_NAME http)
+    if (XXC_DEMO_USES_SHARED)
+        target_compile_definitions(xxc_demo_http PRIVATE XXC_USING_SHARED_LIB)
+    endif()
+    target_link_libraries(xxc_demo_http PRIVATE ${XXC_DEMO_LIB})
+    if (XXC_DEMO_USES_SHARED)
+        set_target_properties(xxc_demo_http PROPERTIES
+            BUILD_RPATH "${CMAKE_BINARY_DIR}"
+            INSTALL_RPATH "$ORIGIN"
+        )
+    endif()
+
+    xxc_freestanding_compile_options(xxc_demo_http PRIVATE)
+    xxc_freestanding_link_options(xxc_demo_http)
 endif()
 
 set(CPACK_GENERATOR "DEB")

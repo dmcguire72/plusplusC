@@ -38,6 +38,8 @@ void _exit(int status)
 }
 #endif
 
+XXC_DYN_EXPORT void (*__xxc_fini_hook)(void) = nullptr;
+
 static atexit_func_t exit_handlers[MAX_ATEXIT_FUNCS];
 static int handler_count = 0;
 static crt_lock_t g_atexit_lock = CRT_LOCK_INIT;
@@ -83,6 +85,13 @@ XXC_NORETURN void exit(int status)
         __crt_lock_release(&g_atexit_lock);
         if (func != nullptr)
             func();
+    }
+
+    if (__xxc_fini_hook != nullptr)
+    {
+        void (*hook)(void) = __xxc_fini_hook;
+        __xxc_fini_hook = nullptr;
+        hook();
     }
 
     _exit(status);

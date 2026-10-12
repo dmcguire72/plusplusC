@@ -98,7 +98,7 @@ void __xxc_platform_init(int argc, char **argv);
 
 extern char **__xxc_environ;
 extern int    __xxc_dynamic_linked;
-void __xxc_run_exe_init_array(int argc, char **argv);
+size_t __xxc_exe_dyn_array(int which, int argc, char **argv, void ***out);
 
 long sys_rt_sigaction(int signum, const void *act, void *oldact, size_t sigsetsize);
 long sys_getpid(void);

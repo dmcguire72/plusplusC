@@ -5,6 +5,8 @@ if (NOT TARGET minicrt)
         ${CMAKE_CURRENT_SOURCE_DIR}/include/alloc.h
         ${CMAKE_CURRENT_SOURCE_DIR}/src/atexit.c
         ${CMAKE_CURRENT_SOURCE_DIR}/include/atexit.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/stackprot.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/chkstk.c
 
         ${CMAKE_CURRENT_SOURCE_DIR}/src/str.c
         ${CMAKE_CURRENT_SOURCE_DIR}/include/str.h

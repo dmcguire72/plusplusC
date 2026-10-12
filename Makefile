@@ -45,11 +45,13 @@ include platform/platform.mk
 include libminicrt/libminicrt.mk
 include libxxc/libxxc.mk
 
-TESTS = test leak_test
+TESTS = test leak_test initfini_test stackframe_test
 DEMOS = app socket
 
 test_SRC      = test/test.ppc
 leak_test_SRC = test/leak.ppc
+initfini_test_SRC = test/initfini.ppc
+stackframe_test_SRC = test/stackframe.ppc
 app_SRC       = examples/app-demo.ppc
 socket_SRC    = examples/socket-demo.ppc
 

@@ -3,6 +3,8 @@
 // Licensed under the MIT License
 
 #include "../sys_linux.h"
+XXC_NO_SSP_BEGIN
+
 
 long sys_write(int fd, const void *buf, size_t count)
 {
@@ -331,3 +333,5 @@ long sys_rt_sigprocmask(int how, const void *set, void *oldset, size_t sigsetsiz
 {
     return syscall(__NR_rt_sigprocmask, (long)how, (long)set, (long)oldset, (long)sigsetsize);
 }
+
+XXC_NO_SSP_END

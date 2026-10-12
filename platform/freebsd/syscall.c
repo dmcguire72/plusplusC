@@ -3,6 +3,8 @@
 // Licensed under the MIT License
 
 #include "../sys_freebsd.h"
+XXC_NO_SSP_BEGIN
+
 
 long sys_write(int fd, const void *buf, size_t count)
 {
@@ -239,3 +241,5 @@ long sys_getpeername(long sockfd, void *addr, unsigned int *addrlen)
 {
     return syscall(XXC_SYS_getpeername, sockfd, (long)addr, (long)addrlen);
 }
+
+XXC_NO_SSP_END

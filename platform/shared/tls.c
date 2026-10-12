@@ -4,12 +4,19 @@
 
 #include "../sys_thread.h"
 #include <mem.h>
+XXC_NO_SSP_BEGIN
+
 
 #define AT_NULL   0
 #define AT_PHDR   3
 #define AT_PHENT  4
 #define AT_PHNUM  5
 #define AT_BASE   7
+#if defined(__FreeBSD__)
+#define AT_RANDOM 16
+#else
+#define AT_RANDOM 25
+#endif
 #define PT_PHDR   6
 #define PT_TLS    7
 
@@ -41,7 +48,14 @@ typedef struct xxc_link_map {
 
 typedef struct { int r_version; xxc_link_map_t *r_map; } xxc_r_debug_t;
 
+#if defined(__x86_64__) || defined(__i386__)
+#define XXC_TCB_SIZE 64
+#define XXC_TCB_CANARY_IDX 5
+#else
 #define XXC_TCB_SIZE 16
+#endif
+
+extern uintptr_t __stack_chk_guard;
 
 __thread struct xxc_thread *__xxc_self;
 struct xxc_thread           __xxc_main_thread;
@@ -64,7 +78,7 @@ static u32 g_gs_entry;
 static inline uintptr_t align_up_u(uintptr_t v, uintptr_t a)   { return (v + a - 1) & ~(a - 1); }
 static inline uintptr_t align_down_u(uintptr_t v, uintptr_t a) { return v & ~(a - 1); }
 
-static void tls_scan(int argc, char **argv)
+static XXC_NO_SSP void tls_scan(int argc, char **argv)
 {
     char **envp = argv + argc + 1;
     while (*envp) envp++;
@@ -76,6 +90,11 @@ static void tls_scan(int argc, char **argv)
     {
         if (av[0] == AT_PHDR)  ph = (const xxc_phdr_t *)av[1];
         if (av[0] == AT_PHNUM) phnum = (size_t)av[1];
+        if (av[0] == AT_RANDOM && av[1] != 0)
+        {
+            uintptr_t r = *(const uintptr_t *)av[1];
+            if (r != 0) __stack_chk_guard = r & ~(uintptr_t)0xff;
+        }
     }
     if (ph == nullptr) return;
 
@@ -110,7 +129,7 @@ size_t __xxc_tls_area_size(void)
 #endif
 }
 
-char *__xxc_tls_setup(char *region_end, void **tp_out)
+XXC_NO_SSP char *__xxc_tls_setup(char *region_end, void **tp_out)
 {
     uintptr_t a = g_tls.align < 16 ? 16 : g_tls.align;
     char *tp, *block, *lowest;
@@ -124,6 +143,9 @@ char *__xxc_tls_setup(char *region_end, void **tp_out)
     block = tp - g_tls.off;
     lowest = g_tls.memsz ? block : tp;
     *(void **)tp = tp;
+#if defined(__x86_64__) || defined(__i386__)
+    ((uintptr_t *)tp)[XXC_TCB_CANARY_IDX] = __stack_chk_guard;
+#endif
 #endif
 
     if (g_tls.memsz)
@@ -137,7 +159,7 @@ char *__xxc_tls_setup(char *region_end, void **tp_out)
     return lowest;
 }
 
-static void set_thread_pointer(void *tp)
+static XXC_NO_SSP void set_thread_pointer(void *tp)
 {
 #if defined(__x86_64__) && defined(__FreeBSD__)
     unsigned long base = (unsigned long)tp;
@@ -267,13 +289,21 @@ static int tls_snapshot_dynamic(int argc, char **argv)
     return 1;
 }
 
-#define DT_INIT_ARRAY   25
-#define DT_INIT_ARRAYSZ 27
+#define DT_INIT_ARRAY      25
+#define DT_FINI_ARRAY      26
+#define DT_INIT_ARRAYSZ    27
+#define DT_FINI_ARRAYSZ    28
+#define DT_PREINIT_ARRAY   32
+#define DT_PREINIT_ARRAYSZ 33
 
-void __xxc_run_exe_init_array(int argc, char **argv)
+size_t __xxc_exe_dyn_array(int which, int argc, char **argv, void ***out)
 {
     /* GCOV_EXCL_START */
+    *out = nullptr;
 #if defined(__linux__)
+    static const long tag_arr[3] = { DT_PREINIT_ARRAY,   DT_INIT_ARRAY,   DT_FINI_ARRAY   };
+    static const long tag_sz[3]  = { DT_PREINIT_ARRAYSZ, DT_INIT_ARRAYSZ, DT_FINI_ARRAYSZ };
+
     char **envp = argv + argc + 1;
     while (*envp) envp++;
     const unsigned long *av = (const unsigned long *)(envp + 1);
@@ -285,7 +315,7 @@ void __xxc_run_exe_init_array(int argc, char **argv)
         if (av[0] == AT_PHDR)  ph = (const xxc_phdr_t *)av[1];
         if (av[0] == AT_PHNUM) phnum = (size_t)av[1];
     }
-    if (ph == nullptr) return;
+    if (ph == nullptr) return 0;
 
     uintptr_t bias = 0;
     for (size_t i = 0; i < phnum; i++)
@@ -295,31 +325,32 @@ void __xxc_run_exe_init_array(int argc, char **argv)
     {
         if (ph[i].p_type != PT_DYNAMIC) continue;
 
-        void (**fns)(int, char **, char **) = nullptr;
+        void **fns = nullptr;
         size_t bytes = 0;
 
         for (const xxc_dyn_t *d = (const xxc_dyn_t *)(bias + (uintptr_t)ph[i].p_vaddr); d->d_tag != 0; d++)
         {
-            if (d->d_tag == DT_INIT_ARRAY)
+            if (d->d_tag == tag_arr[which])
             {
                 uintptr_t a = (uintptr_t)d->d_val;
                 if (a < bias) a += bias;
-                fns = (void (**)(int, char **, char **))a;
+                fns = (void **)a;
             }
-            if (d->d_tag == DT_INIT_ARRAYSZ) bytes = (size_t)d->d_val;
+            if (d->d_tag == tag_sz[which]) bytes = (size_t)d->d_val;
         }
 
-        for (size_t n = 0; fns != nullptr && n < bytes / sizeof(*fns); n++)
-            fns[n](argc, argv, __xxc_environ);
-        return;
+        if (fns == nullptr) return 0;
+        *out = fns;
+        return bytes / sizeof(void *);
     }
 #else
-    (void)argc; (void)argv;
+    (void)which; (void)argc; (void)argv;
 #endif
+    return 0;
     /* GCOV_EXCL_STOP */
 }
 
-void __xxc_platform_init(int argc, char **argv)
+XXC_NO_SSP void __xxc_platform_init(int argc, char **argv)
 {
     __xxc_environ = argv + argc + 1;
 
@@ -355,3 +386,4 @@ void __xxc_platform_init(int argc, char **argv)
     atomic_i32_init(&t->state, XXC_THREAD_DETACHED);
     __xxc_self = t;
 }
+XXC_NO_SSP_END

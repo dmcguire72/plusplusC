@@ -1,0 +1,57 @@
+// ++C Runtime Library
+// Copyright 2026 Daniel McGuire
+// Licensed under the MIT License
+
+#include <def.h>
+#include <parr.h>
+
+#define FRAME 70000
+
+static XXC_NOINLINE void touch(char *p, int n)
+{
+    for (int i = 0; i < n; i += 4096)
+        p[i] = (char)(i >> 12);
+    p[n - 1] = 7;
+}
+
+static XXC_NOINLINE int sum(const char *p, int n)
+{
+    int s = 0;
+    for (int i = 0; i < n; i += 4096)
+        s += p[i];
+    return s + p[n - 1];
+}
+
+static XXC_NOINLINE int deep(void)
+{
+    char buf[FRAME];
+    touch(buf, FRAME);
+    return sum(buf, FRAME);
+}
+
+static XXC_NOINLINE void smash(char *p, int n)
+{
+    for (volatile int i = 0; i < n; i++)
+        p[i] = 'A';
+}
+
+static XXC_NOINLINE int overflow_case(void)
+{
+    char small[16];
+    small[0] = 0;
+    smash(small, 64);
+    return small[0] == 'A' ? 0 : 2;
+}
+
+int program(parr_t csArgs)
+{
+    int expect = 7;
+    for (int i = 0; i < FRAME; i += 4096)
+        expect += (char)(i >> 12);
+    if (deep() != expect)
+        return 1;
+
+    if (csArgs.len > 1)
+        return overflow_case();
+    return 0;
+}

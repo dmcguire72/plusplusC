@@ -17,6 +17,8 @@ void exit(int status);
 
 XXC_NORETURN void _exit(int status);
 
+extern XXC_DYN_IMPORT void (*__xxc_fini_hook)(void);
+
 #ifndef _WIN32
 XXC_NORETURN static inline void _Exit(int status) 
 { 

@@ -5,6 +5,7 @@
 #include "../sys_uefi.h"
 #include <parr.h>
 #include <atexit.h>
+#include <pe_initfini.h>
 
 extern int  program(parr_t csArgs);
 extern void sio_init(unsigned int out, unsigned int err);
@@ -70,6 +71,9 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     sio_init(0, 0);
     __uefi_clock_init();
     xxc_io_init();
+
+    __xxc_fini_hook = xxc_pe_run_dtors;
+    xxc_pe_run_ctors();
 
     char app_path[256] = "";
     EFI_GUID lig = EFI_LOADED_IMAGE_GUID;

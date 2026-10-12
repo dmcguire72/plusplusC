@@ -11,7 +11,7 @@ _start:
     popl %eax
     movl %esp, %edx
     andl $-16, %esp
-    
+    subl $8, %esp
     pushl %edx
     pushl %eax
     call pluspluscBoot

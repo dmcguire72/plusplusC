@@ -5,13 +5,14 @@
 #include <mem.h>
 #include <def.h>
 
+
 #if defined(_MSC_VER) && !defined(__clang__)
 #pragma function(memcpy)
 #pragma function(memset)
 #pragma optimize("", off) 
 #endif
 
-XXC_USED void* memcpy(void* dest, const void* src, size_t n)
+XXC_USED XXC_NO_SSP void* memcpy(void* dest, const void* src, size_t n)
 {
     char* d = (char*)dest;
     const char* s = (const char*)src;
@@ -20,7 +21,7 @@ XXC_USED void* memcpy(void* dest, const void* src, size_t n)
     return dest;
 }
 
-XXC_USED void* memset(void* dest, int c, size_t n)
+XXC_USED XXC_NO_SSP void* memset(void* dest, int c, size_t n)
 {
     char* d = (char*)dest;
     for (size_t i = 0; i < n; i++)
@@ -28,7 +29,7 @@ XXC_USED void* memset(void* dest, int c, size_t n)
     return dest;
 }
 
-XXC_USED void* memmove(void* dest, const void* src, size_t n)
+XXC_USED XXC_NO_SSP void* memmove(void* dest, const void* src, size_t n)
 {
     char* d = (char*)dest;
     const char* s = (const char*)src;
@@ -47,7 +48,7 @@ XXC_USED void* memmove(void* dest, const void* src, size_t n)
     return dest;
 }
 
-XXC_USED int memcmp(const void* a, const void* b, size_t n)
+XXC_USED XXC_NO_SSP int memcmp(const void* a, const void* b, size_t n)
 {
     const unsigned char* pa = (const unsigned char*)a;
     const unsigned char* pb = (const unsigned char*)b;

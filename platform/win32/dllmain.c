@@ -6,6 +6,8 @@
 #include <windows.h>
 #undef va_start
 
+#include <pe_initfini.h>
+
 volatile int _fltused = 0;
 
 BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
@@ -16,7 +18,20 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
     return TRUE;
 }
 
-BOOL WINAPI _DllMainCRTStartup(HINSTANCE hinst, DWORD reason, LPVOID reserved)
+#if defined(__MINGW32__)
+    #define XXC_DLL_ENTRY DllMainCRTStartup
+#else
+    #define XXC_DLL_ENTRY _DllMainCRTStartup
+#endif
+
+BOOL WINAPI XXC_DLL_ENTRY(HINSTANCE hinst, DWORD reason, LPVOID reserved)
 {
-    return DllMain(hinst, reason, reserved);
+    if (reason == DLL_PROCESS_ATTACH)
+        xxc_pe_run_ctors();
+
+    BOOL ok = DllMain(hinst, reason, reserved);
+
+    if ((reason == DLL_PROCESS_ATTACH && !ok) || reason == DLL_PROCESS_DETACH)
+        xxc_pe_run_dtors();
+    return ok;
 }

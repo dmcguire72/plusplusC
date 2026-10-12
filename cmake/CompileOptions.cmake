@@ -4,7 +4,6 @@ function(xxc_freestanding_compile_options target visibility)
             target_compile_options(${target} ${visibility}
                 /O2
                 /GS-
-                /Gs9999999
                 /guard:cf-
                 /d2CastGuard-
             )
@@ -13,8 +12,7 @@ function(xxc_freestanding_compile_options target visibility)
                 -O3
                 -ffreestanding
                 -fno-builtin
-                -fno-stack-protector
-                -mno-stack-arg-probe
+                -fstack-protector
             )
         endif()
     elseif (LINUX OR XXC_FREEBSD)
@@ -24,7 +22,7 @@ function(xxc_freestanding_compile_options target visibility)
                 -flto
                 -ffreestanding
                 -fno-builtin
-                -fno-stack-protector
+                -fstack-protector
                 -ftls-model=initial-exec
             )
 

@@ -36,6 +36,32 @@
     #define XXC_USED
 #endif
 
+#if defined(__has_attribute)
+    #if __has_attribute(no_stack_protector)
+        #define XXC_NO_SSP __attribute__((no_stack_protector))
+    #endif
+#endif
+#if !defined(XXC_NO_SSP) && defined(__GNUC__) && !defined(__clang__)
+    #define XXC_NO_SSP __attribute__((optimize("no-stack-protector")))
+#endif
+#ifndef XXC_NO_SSP
+    #define XXC_NO_SSP
+#endif
+
+#if defined(__clang__) && defined(__has_attribute)
+    #if __has_attribute(no_stack_protector)
+        #define XXC_NO_SSP_BEGIN _Pragma("clang attribute push (__attribute__((no_stack_protector)), apply_to = function)")
+        #define XXC_NO_SSP_END   _Pragma("clang attribute pop")
+    #endif
+#elif defined(__GNUC__) && !defined(__clang__)
+    #define XXC_NO_SSP_BEGIN _Pragma("GCC push_options") _Pragma("GCC optimize (\"no-stack-protector\")")
+    #define XXC_NO_SSP_END   _Pragma("GCC pop_options")
+#endif
+#ifndef XXC_NO_SSP_BEGIN
+    #define XXC_NO_SSP_BEGIN
+    #define XXC_NO_SSP_END
+#endif
+
 #if defined(_WIN32)
     #if defined(XXC_BUILDING_SHARED_LIB)
         #define XXC_DYN_EXPORT __declspec(dllexport)
