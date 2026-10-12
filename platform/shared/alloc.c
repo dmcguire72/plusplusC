@@ -468,8 +468,9 @@ void *__xxc_malloc(size_t size)
 void *__xxc_calloc(size_t count, size_t size)
 {
     size_t total = count * size;
-    if (count != 0 && total / count != size)
-        return nullptr;
+    if (count != 0 && total / count != size) return nullptr;
+    if (total == 0) total = 1; 
+        
     bool zeroed;
     void *p = alloc_impl(total, &zeroed);
     if (p && !zeroed)

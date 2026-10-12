@@ -27,6 +27,8 @@ void *__uefi_calloc(size_t count, size_t size)
 {
     size_t total = count * size;
     if (count != 0 && total / count != size) return nullptr;
+    if (total == 0) total = 1; 
+
     void *p = __uefi_malloc(total);
     if (p) memset(p, 0, total);
     return p;
@@ -49,11 +51,12 @@ void *__uefi_realloc(void *block, size_t size)
     if (size == 0) { __uefi_free(block); return nullptr; }
 
     size_t old = __uefi_usable_size(block);
-    if (size <= old) return block;
+    if (size <= old && size >= old / 2) return block;
 
     void *n = __uefi_malloc(size);
     if (n == nullptr) return nullptr;
-    memcpy(n, block, old);
+    memcpy(n, block, old < size ? old : size);
+
     __uefi_free(block);
     return n;
 }

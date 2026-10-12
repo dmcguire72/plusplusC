@@ -10,9 +10,9 @@
 
 void  *__xxc_malloc(size_t size);
 void  *__xxc_calloc(size_t count, size_t size);
-void  *__xxc_realloc(void *ptr, size_t size);
-void   __xxc_free(void *ptr);
-size_t __xxc_usable_size(void *ptr);
+void  *__xxc_realloc(void* ptr, size_t size);
+void   __xxc_free(void* ptr);
+size_t __xxc_usable_size(void* ptr);
 
 void   __xxc_heap_thread_exit(void);
 

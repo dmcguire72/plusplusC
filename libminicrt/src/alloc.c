@@ -5,77 +5,61 @@
 #include <alloc.h>
 #include <def.h>
 #include <mem.h>
-#ifdef __UEFI__
+
+#ifdef __UEFI_
+
 #include <sys_uefi.h>
-#elif defined(_WIN32)
-#include <windows.h>
-#elif defined(XXC_RAWSYS)
-#include <xxc_sys.h>
-#include <sys_alloc.h>
-#endif
 
-#ifdef __UEFI__
-
-void* malloc(size_t size) 
+void *malloc(size_t size)
 {
-    return __uefi_malloc(size);    
+    return __uefi_malloc(size);
 }
 
-void* calloc(size_t n, size_t size) 
-{ 
-    return __uefi_calloc(n, size); 
+void *calloc(size_t n, size_t size)
+{
+    return __uefi_calloc(n, size);
 }
 
-void* realloc(void *p, size_t size) 
-{ 
-    return __uefi_realloc(p, size); 
+void* realloc(void* p, size_t size)
+{
+    return __uefi_realloc(p, size);
 }
 
 void free(void *p) 
-{ 
-    __uefi_free(p); 
+{
+    __uefi_free(p);
 }
 
 size_t malloc_usable_size(void *p) 
-{ 
-    return __uefi_usable_size(p); 
+{
+    return __uefi_usable_size(p);
 }
 
-#else
+#elif defined(_WIN32)
 
-#ifdef _WIN32
+#include <windows.h>
 
 XXC_DYN_EXPORT HANDLE _xxc_w32_heap = INVALID_HANDLE_VALUE;
 
 void* malloc(size_t size)
 {
-    return HeapAlloc(_xxc_w32_heap, 0, (SIZE_T)size);
+    return HeapAlloc(_xxc_w32_heap, 0, (SIZE_T)(size ? size : 1));
 }
-#elif defined(XXC_RAWSYS)
-void* malloc(size_t size)
-{
-    return __xxc_malloc(size);
-}
-#endif
 
 void* calloc(size_t count, size_t size)
 {
-#ifdef _WIN32
     size_t total = count * size;
 
     if (count != 0 && total / count != size)
         return nullptr;
+
     return HeapAlloc(_xxc_w32_heap, HEAP_ZERO_MEMORY, (SIZE_T)(total ? total : 1));
-#elif defined(XXC_RAWSYS)
-    return __xxc_calloc(count, size);
-#endif
 }
 
-#ifdef _WIN32
 void* realloc(void *block, size_t size)
 {
     if (block == nullptr)
-        return malloc(size);    
+        return malloc(size);
 
     if (size == 0)
     {
@@ -84,43 +68,58 @@ void* realloc(void *block, size_t size)
     }
 
     SIZE_T have = HeapSize(_xxc_w32_heap, 0, block);
-    if (have != (SIZE_T)-1 && (SIZE_T)size <= have)
+
+    if (have != (SIZE_T)-1 && (SIZE_T)size <= have && (SIZE_T)size >= have / 2)
         return block;
 
-    return HeapReAlloc(_xxc_w32_heap, 0, block, (SIZE_T)size);
+    return HeapReAlloc(_xxc_w32_heap, 0, block, (SIZE_T)(size ? size : 1));
 }
-#elif defined(XXC_RAWSYS)
-void* realloc(void *block, size_t size)
-{
-    return __xxc_realloc(block, size);
-}
-#endif
 
-#ifdef _WIN32
 void free(void *block) 
 {
-    if (block == nullptr) 
+    if (block == nullptr)
         return;
 
     HeapFree(_xxc_w32_heap, 0, block);
 }
+
+size_t malloc_usable_size(void *block) 
+{
+    if (block == nullptr)
+        return 0;
+
+    SIZE_T sz = HeapSize(_xxc_w32_heap, 0, block);
+    return (sz == (SIZE_T)-1) ? 0 : (size_t)sz;
+}
+
 #elif defined(XXC_RAWSYS)
+
+#include <xxc_sys.h>
+#include <sys_alloc.h>
+
+void *malloc(size_t size) 
+{
+    return __xxc_malloc(size);
+}
+
+void *calloc(size_t count, size_t size) 
+{
+    return __xxc_calloc(count, size);
+}
+
+void *realloc(void *block, size_t size) 
+{
+    return __xxc_realloc(block, size);
+}
+
 void free(void *block)
 {
     __xxc_free(block);
 }
-#endif
 
-#ifdef _WIN32
-size_t malloc_usable_size(void *block)
-{
-    return block ? (size_t)HeapSize(_xxc_w32_heap, 0, block) : 0;
-}
-#elif defined(XXC_RAWSYS)
 size_t malloc_usable_size(void *block)
 {
     return __xxc_usable_size(block);
 }
-#endif
 
-#endif /* __UEFI__ */
+#endif /* __UEFI_ / _WIN32 / XXC_RAWSYS */
