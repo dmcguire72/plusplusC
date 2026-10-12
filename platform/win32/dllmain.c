@@ -10,7 +10,7 @@
 
 volatile int _fltused = 0;
 
-BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
+static BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
 {
     (void)hinst;
     (void)reason;
