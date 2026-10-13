@@ -1,0 +1,917 @@
+// ++C Runtime Library (xxCRT)
+// Copyright 2026 Daniel McGuire
+// Licensed under the MIT License
+
+#include "http_internal.h"
+#include <files.pph>
+
+CLASS_INFO_ROOT(HTTPRequest);
+CLASS_INFO_ROOT(HTTPResponse);
+
+const char *http_status_text(int code)
+{
+    switch (code)
+    {
+        case 100: return "Continue";
+        case 101: return "Switching Protocols";
+        case 200: return "OK";
+        case 201: return "Created";
+        case 202: return "Accepted";
+        case 203: return "Non-Authoritative Information";
+        case 204: return "No Content";
+        case 205: return "Reset Content";
+        case 206: return "Partial Content";
+        case 300: return "Multiple Choices";
+        case 301: return "Moved Permanently";
+        case 302: return "Found";
+        case 303: return "See Other";
+        case 304: return "Not Modified";
+        case 307: return "Temporary Redirect";
+        case 308: return "Permanent Redirect";
+        case 400: return "Bad Request";
+        case 401: return "Unauthorized";
+        case 403: return "Forbidden";
+        case 404: return "Not Found";
+        case 405: return "Method Not Allowed";
+        case 406: return "Not Acceptable";
+        case 408: return "Request Timeout";
+        case 409: return "Conflict";
+        case 410: return "Gone";
+        case 411: return "Length Required";
+        case 412: return "Precondition Failed";
+        case 413: return "Content Too Large";
+        case 414: return "URI Too Long";
+        case 415: return "Unsupported Media Type";
+        case 416: return "Range Not Satisfiable";
+        case 417: return "Expectation Failed";
+        case 418: return "I'm a teapot";
+        case 422: return "Unprocessable Content";
+        case 426: return "Upgrade Required";
+        case 428: return "Precondition Required";
+        case 429: return "Too Many Requests";
+        case 431: return "Request Header Fields Too Large";
+        case 500: return "Internal Server Error";
+        case 501: return "Not Implemented";
+        case 502: return "Bad Gateway";
+        case 503: return "Service Unavailable";
+        case 504: return "Gateway Timeout";
+        case 505: return "HTTP Version Not Supported";
+        default:  return "Unknown";
+    }
+}
+
+typedef struct { const char *ext; const char *type; } mime_entry_t;
+
+static const mime_entry_t g_mime[] = {
+#include "mimetypes.inl"
+};
+
+const char *http_mime_type(const char *path)
+{
+    if (path == nullptr)
+        return "application/octet-stream";
+
+    size_t n = strlen(path);
+    size_t dot = n;
+
+    for (size_t i = n; i > 0; i--)
+    {
+        char c = path[i - 1];
+        if (c == '/' || c == '\\')
+            break;
+        if (c == '.')
+        {
+            dot = i;
+            break;
+        }
+    }
+
+    if (dot == n)
+        return "application/octet-stream";
+
+    const char *ext = path + dot;
+    size_t elen = n - dot;
+
+    for (size_t i = 0; i < sizeof(g_mime) / sizeof(g_mime[0]); i++)
+        if (http__ieq_n(ext, elen, g_mime[i].ext))
+            return g_mime[i].type;
+
+    return "application/octet-stream";
+}
+
+size_t http_format_date(char *buf, size_t cap, u64 unix_ms)
+{
+    static const char *wd[] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+    static const char *mo[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+
+    if (buf == nullptr || cap < 30 || unix_ms == 0)
+        return 0;
+
+    u64 secs = unix_ms / 1000ull;
+    u64 days = secs / 86400ull;
+    u32 rem  = (u32)(secs % 86400ull);
+
+    u64 z   = days + 719468ull;
+    u64 era = z / 146097ull;
+    u64 doe = z - era * 146097ull;
+    u64 yoe = (doe - doe / 1460ull + doe / 36524ull - doe / 146096ull) / 365ull;
+    u64 doy = doe - (365ull * yoe + yoe / 4ull - yoe / 100ull);
+    u64 mp  = (5ull * doy + 2ull) / 153ull;
+    u32 d   = (u32)(doy - (153ull * mp + 2ull) / 5ull + 1ull);
+    u32 m   = (u32)(mp < 10 ? mp + 3 : mp - 9);
+    u32 y   = (u32)(yoe + era * 400ull) + (m <= 2 ? 1u : 0u);
+
+    int n = snprintf(buf, cap, "%s, %02u %s %04u %02u:%02u:%02u GMT",
+                     wd[(days + 4ull) % 7ull], d, mo[m - 1], y,
+                     rem / 3600u, (rem / 60u) % 60u, rem % 60u);
+
+    return n > 0 ? (size_t)n : 0;
+}
+
+bool http_url_decode(const char *s, size_t n, bool plus_as_space, dstr_t *out)
+{
+    if (out == nullptr || out->data == nullptr)
+        return false;
+
+    for (size_t i = 0; i < n; i++)
+    {
+        char c = s[i];
+
+        if (c == '%')
+        {
+            if (i + 2 >= n)
+                return false;
+            int hi = http__hexval((u8)s[i + 1]);
+            int lo = http__hexval((u8)s[i + 2]);
+            if (hi < 0 || lo < 0)
+                return false;
+            dstr_append_char(out, (char)((hi << 4) | lo));
+            i += 2;
+        }
+        else if (c == '+' && plus_as_space)
+        {
+            dstr_append_char(out, ' ');
+        }
+        else
+        {
+            dstr_append_char(out, c);
+        }
+    }
+
+    return true;
+}
+
+CONSTRUCTOR(HTTPRequest)
+{
+    self->method = (dstr_t){0};
+    self->target = (dstr_t){0};
+    self->path   = (dstr_t){0};
+    self->query  = (dstr_t){0};
+    self->version_minor = 1;
+    self->headers = http__new_string_map();
+    self->params  = nullptr;
+    self->body = nullptr;
+    self->body_len = 0;
+    self->keep_alive = false;
+    self->has_peer = false;
+    self->user = nullptr;
+
+    METHOD_LINK(HTTPRequest, header);
+    METHOD_LINK(HTTPRequest, param);
+    METHOD_LINK(HTTPRequest, query_param);
+    METHOD_LINK(HTTPRequest, is);
+    METHOD_LINK(HTTPRequest, peer_ip);
+}
+
+DECONSTRUCTOR(HTTPRequest)
+{
+    dstr_free(&self->method);
+    dstr_free(&self->target);
+    dstr_free(&self->path);
+    dstr_free(&self->query);
+    if (self->headers) REMOVE(self->headers);
+    if (self->params)  REMOVE(self->params);
+    free(self->body);
+}
+
+IMPLEMENT(HTTPRequest, const char *, header, (void *self, const char *name))
+{
+    HTTPRequest *this = (HTTPRequest *)self;
+    char key[64];
+    size_t n = name ? strlen(name) : 0;
+
+    if (n == 0 || n >= sizeof(key))
+        return nullptr;
+
+    for (size_t i = 0; i < n; i++)
+        key[i] = (char)http__lower((u8)name[i]);
+    key[n] = '\0';
+
+    return http__map_get(this->headers, key);
+}
+
+IMPLEMENT(HTTPRequest, const char *, param, (void *self, const char *name))
+{
+    HTTPRequest *this = (HTTPRequest *)self;
+    return name ? http__map_get(this->params, name) : nullptr;
+}
+
+IMPLEMENT(HTTPRequest, dstr_t, query_param, (void *self, const char *name))
+{
+    HTTPRequest *this = (HTTPRequest *)self;
+    dstr_t result = {0};
+
+    if (name == nullptr || this->query.data == nullptr)
+        return result;
+
+    const char *q = this->query.data;
+    size_t qn = this->query.len;
+    size_t pos = 0;
+
+    while (pos <= qn)
+    {
+        size_t end = pos;
+        while (end < qn && q[end] != '&')
+            end++;
+
+        if (end > pos)
+        {
+            size_t eq = pos;
+            while (eq < end && q[eq] != '=')
+                eq++;
+
+            dstr_t key = dstr_new("");
+            bool ok = http_url_decode(q + pos, eq - pos, true, &key) && strcmp(key.data, name) == 0;
+            dstr_free(&key);
+
+            if (ok)
+            {
+                dstr_t val = dstr_new("");
+                if (eq < end)
+                    http_url_decode(q + eq + 1, end - eq - 1, true, &val);
+                return val;
+            }
+        }
+
+        pos = end + 1;
+    }
+
+    return result;
+}
+
+IMPLEMENT(HTTPRequest, bool, is, (void *self, const char *method))
+{
+    HTTPRequest *this = (HTTPRequest *)self;
+    return this->method.data != nullptr && method != nullptr && strcmp(this->method.data, method) == 0;
+}
+
+IMPLEMENT(HTTPRequest, bool, peer_ip, (void *self, char *buf, size_t cap))
+{
+    HTTPRequest *this = (HTTPRequest *)self;
+    return this->has_peer && sock_inet_ntop4(&this->peer.sin_addr, buf, cap);
+}
+
+CONSTRUCTOR(HTTPResponse)
+{
+    self->conn = nullptr;
+    self->status = 200;
+    self->version_minor = 1;
+    self->keepalive_s = 5;
+    self->hdrs = nullptr;
+    self->hdr_len = self->hdr_cap = 0;
+    self->is_head_request = false;
+    self->keep_alive = true;
+    self->head_sent = false;
+    self->ended = false;
+    self->failed = false;
+    self->chunked = false;
+    self->suppress_body = false;
+    self->declared_len = -1;
+    self->body_written = 0;
+    self->bytes_out = 0;
+
+    METHOD_LINK(HTTPResponse, set_status);
+    METHOD_LINK(HTTPResponse, set_header);
+    METHOD_LINK(HTTPResponse, add_header);
+    METHOD_LINK(HTTPResponse, get_header);
+    METHOD_LINK(HTTPResponse, write_head);
+    METHOD_LINK(HTTPResponse, write);
+    METHOD_LINK(HTTPResponse, end);
+    METHOD_LINK(HTTPResponse, send);
+    METHOD_LINK(HTTPResponse, send_text);
+    METHOD_LINK(HTTPResponse, send_file);
+    METHOD_LINK(HTTPResponse, redirect);
+}
+
+DECONSTRUCTOR(HTTPResponse)
+{
+    for (size_t i = 0; i < self->hdr_len; i++)
+    {
+        free(self->hdrs[i].name);
+        free(self->hdrs[i].value);
+    }
+    free(self->hdrs);
+}
+
+static long res_find(const HTTPResponse *r, const char *name)
+{
+    size_t n = strlen(name);
+    for (size_t i = 0; i < r->hdr_len; i++)
+        if (http__ieq_n(r->hdrs[i].name, strlen(r->hdrs[i].name), name) && strlen(r->hdrs[i].name) == n)
+            return (long)i;
+    return -1;
+}
+
+static const char *res_get(const HTTPResponse *r, const char *name)
+{
+    long i = res_find(r, name);
+    return i >= 0 ? r->hdrs[i].value : nullptr;
+}
+
+static bool res_valid_header(const char *name, const char *value)
+{
+    if (name == nullptr || value == nullptr || *name == '\0')
+        return false;
+    for (const char *p = name; *p; p++)
+        if (!http__is_token_char((u8)*p))
+            return false;
+    for (const char *p = value; *p; p++)
+        if (!http__valid_value_char((u8)*p))
+            return false;
+    return true;
+}
+
+static bool res_store(HTTPResponse *r, const char *name, const char *value, bool replace)
+{
+    if (r->head_sent || !res_valid_header(name, value))
+        return false;
+
+    if (replace)
+    {
+        long i = res_find(r, name);
+        if (i >= 0)
+        {
+            char *nv = http__strdup_n(value, strlen(value));
+            if (nv == nullptr)
+                return false;
+            free(r->hdrs[i].value);
+            r->hdrs[i].value = nv;
+            return true;
+        }
+    }
+
+    if (r->hdr_len == r->hdr_cap)
+    {
+        size_t ncap = r->hdr_cap ? r->hdr_cap * 2 : 8;
+        http_header_t *p = (http_header_t *)realloc(r->hdrs, ncap * sizeof(http_header_t));
+        if (p == nullptr)
+            return false;
+        r->hdrs = p;
+        r->hdr_cap = ncap;
+    }
+
+    char *n = http__strdup_n(name, strlen(name));
+    char *v = http__strdup_n(value, strlen(value));
+    if (n == nullptr || v == nullptr)
+    {
+        free(n);
+        free(v);
+        return false;
+    }
+
+    r->hdrs[r->hdr_len].name = n;
+    r->hdrs[r->hdr_len].value = v;
+    r->hdr_len++;
+    return true;
+}
+
+IMPLEMENT(HTTPResponse, void, set_status, (void *self, int code))
+{
+    HTTPResponse *this = (HTTPResponse *)self;
+    if (!this->head_sent)
+        this->status = code;
+}
+
+IMPLEMENT(HTTPResponse, bool, set_header, (void *self, const char *name, const char *value))
+{
+    return res_store((HTTPResponse *)self, name, value, true);
+}
+
+IMPLEMENT(HTTPResponse, bool, add_header, (void *self, const char *name, const char *value))
+{
+    return res_store((HTTPResponse *)self, name, value, false);
+}
+
+IMPLEMENT(HTTPResponse, const char *, get_header, (void *self, const char *name))
+{
+    return name ? res_get((HTTPResponse *)self, name) : nullptr;
+}
+
+static void res_build_head(HTTPResponse *r, bool known_len, u64 len, http_buf_t *b)
+{
+    int code = r->status;
+    if (code < 100 || code > 599)
+        code = 500;
+
+    bool nobody = code < 200 || code == 204 || code == 304;
+
+    if (http__list_has(res_get(r, "connection"), "close"))
+        r->keep_alive = false;
+
+    const char *ucl = res_get(r, "content-length");
+
+    r->declared_len = -1;
+    r->chunked = false;
+
+    if (nobody) {}
+    else if (known_len)
+    {
+        r->declared_len = (i64)len;
+    }
+    else if (ucl != nullptr)
+    {
+        u64 v;
+        if (http__parse_u64(ucl, strlen(ucl), &v) && v <= 0x7FFFFFFFFFFFFFFFull)
+            r->declared_len = (i64)v;
+    }
+
+    if (!nobody && r->declared_len < 0 && !r->is_head_request)
+    {
+        if (r->version_minor >= 1)
+            r->chunked = true;
+        else
+            r->keep_alive = false;
+    }
+
+    r->suppress_body = nobody || r->is_head_request;
+
+    http_buf_puts(b, r->version_minor >= 1 ? "HTTP/1.1 " : "HTTP/1.0 ");
+    http_buf_put_u64(b, (u64)code);
+    http_buf_putc(b, ' ');
+    http_buf_puts(b, http_status_text(code));
+    http_buf_puts(b, "\r\n");
+
+    bool have_date = false;
+
+    for (size_t i = 0; i < r->hdr_len; i++)
+    {
+        const char *n = r->hdrs[i].name;
+        size_t nl = strlen(n);
+
+        if (http__ieq_n(n, nl, "content-length") || http__ieq_n(n, nl, "transfer-encoding") ||
+            http__ieq_n(n, nl, "connection") || http__ieq_n(n, nl, "keep-alive"))
+            continue;
+
+        if (http__ieq_n(n, nl, "date"))
+            have_date = true;
+
+        http_buf_puts(b, n);
+        http_buf_puts(b, ": ");
+        http_buf_puts(b, r->hdrs[i].value);
+        http_buf_puts(b, "\r\n");
+    }
+
+    if (!have_date)
+    {
+        char date[40];
+        if (http_format_date(date, sizeof(date), clock_realtime_ms()) > 0)
+        {
+            http_buf_puts(b, "Date: ");
+            http_buf_puts(b, date);
+            http_buf_puts(b, "\r\n");
+        }
+    }
+
+    if (r->declared_len >= 0 && code != 304 && code != 204 && code >= 200)
+    {
+        http_buf_puts(b, "Content-Length: ");
+        http_buf_put_u64(b, (u64)r->declared_len);
+        http_buf_puts(b, "\r\n");
+    }
+
+    if (r->chunked)
+        http_buf_puts(b, "Transfer-Encoding: chunked\r\n");
+
+    if (!r->keep_alive)
+    {
+        http_buf_puts(b, "Connection: close\r\n");
+    }
+    else
+    {
+        if (r->version_minor == 0)
+            http_buf_puts(b, "Connection: keep-alive\r\n");
+        if (r->keepalive_s > 0)
+        {
+            http_buf_puts(b, "Keep-Alive: timeout=");
+            http_buf_put_u64(b, r->keepalive_s);
+            http_buf_puts(b, "\r\n");
+        }
+    }
+
+    http_buf_puts(b, "\r\n");
+    r->head_sent = true;
+}
+
+static bool res_flush(HTTPResponse *r, http_buf_t *b)
+{
+    bool ok = !b->oom && r->conn != nullptr && CALL2(r->conn, write_all, b->data, b->len);
+    if (ok)
+        r->bytes_out += b->len;
+    else
+    {
+        r->failed = true;
+        r->keep_alive = false;
+    }
+    return ok;
+}
+
+IMPLEMENT(HTTPResponse, bool, write_head, (void *self))
+{
+    HTTPResponse *this = (HTTPResponse *)self;
+    if (this->head_sent || this->ended || this->failed)
+        return this->head_sent && !this->failed;
+
+    http_buf_t b = {0};
+    res_build_head(this, false, 0, &b);
+    bool ok = res_flush(this, &b);
+    http_buf_free(&b);
+    return ok;
+}
+
+IMPLEMENT(HTTPResponse, bool, write, (void *self, const void *data, size_t len))
+{
+    HTTPResponse *this = (HTTPResponse *)self;
+
+    if (this->ended || this->failed)
+        return false;
+
+    if (!this->head_sent && !HTTPResponse__write_head(self))
+        return false;
+
+    if (len == 0 || this->suppress_body)
+        return true;
+
+    if (this->declared_len >= 0 && this->body_written + len > (u64)this->declared_len)
+    {
+        this->failed = true;
+        this->keep_alive = false;
+        return false;
+    }
+
+    bool ok;
+
+    if (this->chunked)
+    {
+        http_buf_t b = {0};
+        http_buf_put_hex(&b, (u64)len);
+        http_buf_puts(&b, "\r\n");
+
+        if (len <= 65536)
+        {
+            http_buf_append(&b, data, len);
+            http_buf_puts(&b, "\r\n");
+            ok = res_flush(this, &b);
+        }
+        else
+        {
+            ok = res_flush(this, &b)
+              && CALL2(this->conn, write_all, data, len)
+              && CALL2(this->conn, write_all, "\r\n", 2);
+            if (ok)
+                this->bytes_out += len + 2;
+            else
+            {
+                this->failed = true;
+                this->keep_alive = false;
+            }
+        }
+        http_buf_free(&b);
+    }
+    else
+    {
+        ok = CALL2(this->conn, write_all, data, len);
+        if (ok)
+            this->bytes_out += len;
+        else
+        {
+            this->failed = true;
+            this->keep_alive = false;
+        }
+    }
+
+    if (ok)
+        this->body_written += len;
+    return ok;
+}
+
+IMPLEMENT(HTTPResponse, bool, end, (void *self))
+{
+    HTTPResponse *this = (HTTPResponse *)self;
+
+    if (this->ended)
+        return !this->failed;
+    if (this->failed)
+    {
+        this->ended = true;
+        return false;
+    }
+
+    bool ok = true;
+
+    if (!this->head_sent)
+    {
+        bool known = !(this->is_head_request && res_get(this, "content-length") != nullptr);
+        http_buf_t b = {0};
+        res_build_head(this, known, 0, &b);
+        ok = res_flush(this, &b);
+        http_buf_free(&b);
+    }
+    else if (this->chunked && !this->suppress_body)
+    {
+        ok = CALL2(this->conn, write_all, "0\r\n\r\n", 5);
+        if (ok)
+            this->bytes_out += 5;
+        else
+        {
+            this->failed = true;
+            this->keep_alive = false;
+        }
+    }
+
+    if (ok && !this->suppress_body && this->declared_len >= 0 &&
+        this->body_written < (u64)this->declared_len)
+        this->keep_alive = false;
+
+    this->ended = true;
+    return ok;
+}
+
+IMPLEMENT(HTTPResponse, bool, send, (void *self, int status, const char *content_type, const void *body, size_t len))
+{
+    HTTPResponse *this = (HTTPResponse *)self;
+
+    if (this->head_sent || this->ended || this->failed)
+        return false;
+
+    this->status = status;
+    if (content_type != nullptr)
+        res_store(this, "Content-Type", content_type, true);
+
+    http_buf_t b = {0};
+    res_build_head(this, true, (u64)len, &b);
+
+    bool ok;
+
+    if (!this->suppress_body && len > 0 && len <= 65536)
+    {
+        http_buf_append(&b, body, len);
+        ok = res_flush(this, &b);
+        if (ok)
+            this->body_written += len;
+    }
+    else
+    {
+        ok = res_flush(this, &b);
+        if (ok && !this->suppress_body && len > 0)
+        {
+            ok = CALL2(this->conn, write_all, body, len);
+            if (ok)
+            {
+                this->bytes_out += len;
+                this->body_written += len;
+            }
+            else
+            {
+                this->failed = true;
+                this->keep_alive = false;
+            }
+        }
+    }
+
+    http_buf_free(&b);
+    this->ended = true;
+    return ok;
+}
+
+IMPLEMENT(HTTPResponse, bool, send_text, (void *self, int status, const char *content_type, const char *body))
+{
+    return HTTPResponse__send(self, status, content_type, body, body ? strlen(body) : 0);
+}
+
+IMPLEMENT(HTTPResponse, bool, redirect, (void *self, int status, const char *location))
+{
+    HTTPResponse *this = (HTTPResponse *)self;
+
+    if (!res_store(this, "Location", location, true))
+        return false;
+
+    return HTTPResponse__send(self, status, "text/plain; charset=utf-8", http_status_text(status),
+                              strlen(http_status_text(status)));
+}
+
+#define HTTP_FILE_CHUNK ((size_t)16384)
+
+IMPLEMENT(HTTPResponse, bool, send_file, (void *self, const char *path, const char *content_type))
+{
+    HTTPResponse *this = (HTTPResponse *)self;
+
+    if (this->head_sent || this->ended || this->failed || path == nullptr)
+        return false;
+
+    Stream *f = fopen_str(path, "rb");
+    if (f == nullptr)
+        return false;
+
+    i64 size = CALL2(f, seek, 0, FS_SEEK_END);
+    if (size < 0 || CALL2(f, seek, 0, FS_SEEK_SET) < 0)
+    {
+        CALL0(f, close);
+        REMOVE(f);
+        return false;
+    }
+
+    u8 *buf = (u8 *)malloc(HTTP_FILE_CHUNK);
+    if (buf == nullptr)
+    {
+        CALL0(f, close);
+        REMOVE(f);
+        return false;
+    }
+
+    i64 got = CALL2(f, read, buf, (size_t)(size < (i64)HTTP_FILE_CHUNK ? size : (i64)HTTP_FILE_CHUNK));
+    bool readable = got >= 0 && (size == 0 || got > 0);
+
+    if (readable)
+    {
+        char len[24];
+        snprintf(len, sizeof(len), "%llu", (unsigned long long)size);
+
+        res_store(this, "Content-Length", len, true);
+        if (res_get(this, "content-type") == nullptr)
+            res_store(this, "Content-Type", content_type ? content_type : http_mime_type(path), true);
+        else if (content_type != nullptr)
+            res_store(this, "Content-Type", content_type, true);
+
+        if (HTTPResponse__write_head(self))
+        {
+            i64 remaining = size;
+
+            while (remaining > 0 && !this->failed)
+            {
+                if (got <= 0)
+                {
+                    size_t want = (size_t)(remaining < (i64)HTTP_FILE_CHUNK ? remaining : (i64)HTTP_FILE_CHUNK);
+                    got = CALL2(f, read, buf, want);
+                    if (got <= 0)
+                        break;
+                }
+
+                if (!HTTPResponse__write(self, buf, (size_t)got))
+                    break;
+                remaining -= got;
+                got = 0;
+            }
+
+            if (remaining > 0)
+                this->keep_alive = false;
+
+            HTTPResponse__end(self);
+        }
+    }
+
+    free(buf);
+    CALL0(f, close);
+    REMOVE(f);
+    return readable;
+}
+
+static void static_error(HTTPResponse *res, int code)
+{
+    const char *t = http_status_text(code);
+    char body[64];
+    int n = snprintf(body, sizeof(body), "%d %s\n", code, t);
+    CALL4(res, send, code, "text/plain; charset=utf-8", body, (size_t)(n > 0 ? n : 0));
+}
+
+static bool static_path_safe(const char *rel, size_t n)
+{
+    size_t i = 0;
+
+    while (i < n)
+    {
+        while (i < n && rel[i] == '/')
+            i++;
+
+        size_t s = i;
+        while (i < n && rel[i] != '/')
+        {
+            u8 c = (u8)rel[i];
+            if (c == '\\' || c < 0x20 || c == 0x7f)
+                return false;
+#if defined(_WIN32)
+            if (c == ':')
+                return false;
+#endif
+            i++;
+        }
+
+        size_t l = i - s;
+        if (l == 2 && rel[s] == '.' && rel[s + 1] == '.')
+            return false;
+    }
+
+    return true;
+}
+
+void http_serve_static(HTTPRequest *req, HTTPResponse *res, const char *root, const char *prefix)
+{
+    if (!CALL1(req, is, "GET") && !CALL1(req, is, "HEAD"))
+    {
+        res_store(res, "Allow", "GET, HEAD", true);
+        static_error(res, 405);
+        return;
+    }
+
+    const char *p = req->path.data ? req->path.data : "/";
+    size_t plen = req->path.len;
+
+    size_t pre = prefix ? strlen(prefix) : 0;
+    while (pre > 0 && prefix[pre - 1] == '/')
+        pre--;
+
+    if (pre > 0)
+    {
+        if (plen < pre || memcmp(p, prefix, pre) != 0 || (plen > pre && p[pre] != '/'))
+        {
+            static_error(res, 404);
+            return;
+        }
+        p += pre;
+        plen -= pre;
+    }
+
+    dstr_t rel = dstr_new("");
+    if (!http_url_decode(p, plen, false, &rel) || rel.data == nullptr)
+    {
+        dstr_free(&rel);
+        static_error(res, 400);
+        return;
+    }
+
+    if (strlen(rel.data) != rel.len || !static_path_safe(rel.data, rel.len))
+    {
+        dstr_free(&rel);
+        static_error(res, 400);
+        return;
+    }
+
+    size_t rl = strlen(root);
+    while (rl > 1 && (root[rl - 1] == '/' || root[rl - 1] == '\\'))
+        rl--;
+
+    dstr_t full = dstr_new("");
+    dstr_append(&full, root);
+    full.len = rl;
+    full.data[rl] = '\0';
+    if (rel.len == 0 || rel.data[0] != '/')
+        dstr_append_char(&full, '/');
+    dstr_append(&full, rel.data);
+
+    bool dir_like = rel.len == 0 || rel.data[rel.len - 1] == '/';
+    if (dir_like)
+        dstr_append(&full, "index.html");
+
+    if (!HTTPResponse__send_file(res, full.data, nullptr))
+    {
+        bool done = false;
+
+        if (!dir_like)
+        {
+            dstr_append(&full, "/index.html");
+            Stream *probe = fopen_str(full.data, "rb");
+            if (probe != nullptr)
+            {
+                CALL0(probe, close);
+                REMOVE(probe);
+
+                dstr_t loc = dstr_new(req->path.data);
+                dstr_append_char(&loc, '/');
+                if (req->query.len > 0)
+                {
+                    dstr_append_char(&loc, '?');
+                    dstr_append(&loc, req->query.data);
+                }
+                HTTPResponse__redirect(res, 301, loc.data);
+                dstr_free(&loc);
+                done = true;
+            }
+        }
+
+        if (!done)
+            static_error(res, 404);
+    }
+
+    dstr_free(&full);
+    dstr_free(&rel);
+}

@@ -1,0 +1,745 @@
+// ++C Runtime Library (xxCRT)
+// Copyright 2026 Daniel McGuire
+// Licensed under the MIT License
+
+#include "http_internal.h"
+#include <thread.h>
+
+CLASS_INFO_ROOT(HTTPServer);
+
+#define HTTP_MAX_WORKERS      512u
+#define HTTP_LISTEN_BACKLOG   511
+
+CONSTRUCTOR(HTTPServer)
+{
+    u32 cpus = thread_processor_count();
+    self->workers = (cpus > 0) ? cpus : 1;
+    self->max_header_bytes = HTTP_DEFAULT_MAX_HEADER_BYTES;
+    self->max_body_bytes = HTTP_DEFAULT_MAX_BODY_BYTES;
+    self->headers_timeout_ms = 30000;
+    self->request_timeout_ms = 120000;
+    self->keepalive_timeout_ms = 5000;
+    self->send_timeout_ms = 30000;
+    self->max_requests_per_conn = 1000;
+    self->access_log = false;
+
+    self->listener = nullptr;
+    self->threads = nullptr;
+    self->nthreads = 0;
+    self->routes = nullptr;
+    self->route_len = self->route_cap = 0;
+    self->fallback = nullptr;
+    self->fallback_user = nullptr;
+    atomic_bool_init(&self->stopping, false);
+    atomic_bool_init(&self->running, false);
+    atomic_u32_init(&self->active, 0);
+    atomic_u64_init(&self->served, 0);
+
+    METHOD_LINK(HTTPServer, set_handler);
+    METHOD_LINK(HTTPServer, route);
+    METHOD_LINK(HTTPServer, listen);
+    METHOD_LINK(HTTPServer, port);
+    METHOD_LINK(HTTPServer, wait);
+    METHOD_LINK(HTTPServer, stop);
+    METHOD_LINK(HTTPServer, requests_served);
+    METHOD_LINK(HTTPServer, active_connections);
+}
+
+DECONSTRUCTOR(HTTPServer)
+{
+    if (atomic_bool_load(&self->running))
+    {
+        HTTPServer__stop(self);
+        HTTPServer__wait(self);
+    }
+
+    for (size_t i = 0; i < self->route_len; i++)
+    {
+        free(self->routes[i].method);
+        free(self->routes[i].pattern);
+    }
+    free(self->routes);
+
+    if (self->listener)
+        REMOVE(self->listener);
+}
+
+IMPLEMENT(HTTPServer, void, set_handler, (void *self, http_handler_fn fn, void *user))
+{
+    HTTPServer *this = (HTTPServer *)self;
+    this->fallback = fn;
+    this->fallback_user = user;
+}
+
+IMPLEMENT(HTTPServer, bool, route, (void *self, const char *method, const char *pattern,
+                                    http_handler_fn fn, void *user))
+{
+    HTTPServer *this = (HTTPServer *)self;
+
+    if (atomic_bool_load(&this->running) || fn == nullptr || pattern == nullptr || pattern[0] != '/')
+        return false;
+
+    if (this->route_len == this->route_cap)
+    {
+        size_t ncap = this->route_cap ? this->route_cap * 2 : 16;
+        http_route_t *p = (http_route_t *)realloc(this->routes, ncap * sizeof(http_route_t));
+        if (p == nullptr)
+            return false;
+        this->routes = p;
+        this->route_cap = ncap;
+    }
+
+    size_t pl = strlen(pattern);
+    bool prefix = pl >= 2 && pattern[pl - 2] == '/' && pattern[pl - 1] == '*';
+    if (prefix)
+        pl -= 2;
+
+    http_route_t *r = &this->routes[this->route_len];
+
+    r->method = nullptr;
+    if (method != nullptr && strcmp(method, "*") != 0)
+    {
+        r->method = http__strdup_n(method, strlen(method));
+        if (r->method == nullptr)
+            return false;
+    }
+
+    r->pattern = http__strdup_n(pattern, pl);
+    if (r->pattern == nullptr)
+    {
+        free(r->method);
+        return false;
+    }
+
+    r->prefix = prefix;
+    r->fn = fn;
+    r->user = user;
+    this->route_len++;
+    return true;
+}
+
+IMPLEMENT(HTTPServer, u64, requests_served, (void *self))
+{
+    return atomic_u64_load(&((HTTPServer *)self)->served);
+}
+
+IMPLEMENT(HTTPServer, u32, active_connections, (void *self))
+{
+    return atomic_u32_load(&((HTTPServer *)self)->active);
+}
+
+IMPLEMENT(HTTPServer, u16, port, (void *self))
+{
+    HTTPServer *this = (HTTPServer *)self;
+    return this->listener ? sock_local_port(this->listener->fd) : 0;
+}
+
+static bool next_seg(const char *s, size_t n, size_t *pos, const char **seg, size_t *slen)
+{
+    size_t p = *pos;
+
+    if (p < n && s[p] == '/')
+        p++;
+    if (p >= n)
+    {
+        *pos = n;
+        return false;
+    }
+
+    size_t start = p;
+    while (p < n && s[p] != '/')
+        p++;
+
+    *seg = s + start;
+    *slen = p - start;
+    *pos = p;
+    return true;
+}
+
+static bool route_match(const http_route_t *r, HTTPRequest *req)
+{
+    const char *path = req->path.data ? req->path.data : "/";
+    size_t plen = req->path.len;
+    const char *pat = r->pattern;
+    size_t pn = strlen(pat);
+    size_t pp = 0, sp = 0;
+
+    for (;;)
+    {
+        const char *pseg, *sseg;
+        size_t pl, sl;
+
+        if (!next_seg(pat, pn, &pp, &pseg, &pl))
+        {
+            if (r->prefix)
+                return true;
+            return !next_seg(path, plen, &sp, &sseg, &sl);
+        }
+
+        if (!next_seg(path, plen, &sp, &sseg, &sl))
+            return false;
+
+        if (pl > 0 && pseg[0] == ':')
+        {
+            if (sl == 0 || pl == 1)
+                return false;
+
+            dstr_t val = dstr_new("");
+            bool ok = http_url_decode(sseg, sl, false, &val);
+            if (ok)
+            {
+                if (req->params == nullptr)
+                    req->params = http__new_string_map();
+                if (req->params == nullptr || !map_set(&req->params->table, pseg + 1, pl - 1, val.data))
+                    ok = false;
+                else
+                    val.data = nullptr;
+            }
+            dstr_free(&val);
+            if (!ok)
+                return false;
+        }
+        else if (pl != sl || memcmp(pseg, sseg, pl) != 0)
+        {
+            return false;
+        }
+    }
+}
+
+static bool route_method_ok(const http_route_t *r, const HTTPRequest *req)
+{
+    if (r->method == nullptr)
+        return true;
+    if (strcmp(r->method, req->method.data) == 0)
+        return true;
+    return strcmp(req->method.data, "HEAD") == 0 && strcmp(r->method, "GET") == 0;
+}
+
+static void allow_add(http_buf_t *b, const char *m)
+{
+    const char *p = (const char *)b->data;
+    size_t ml = strlen(m);
+
+    while (p != nullptr && *p)
+    {
+        const char *e = p;
+        while (*e && *e != ',')
+            e++;
+        if ((size_t)(e - p) == ml && memcmp(p, m, ml) == 0)
+            return;
+        p = *e ? e + 2 : e;
+    }
+
+    if (b->len > 0)
+        http_buf_puts(b, ", ");
+    http_buf_puts(b, m);
+}
+
+static void send_simple(HTTPResponse *res, int code)
+{
+    char body[96];
+    int n = snprintf(body, sizeof(body), "%d %s\n", code, http_status_text(code));
+    CALL4(res, send, code, "text/plain; charset=utf-8", body, (size_t)(n > 0 ? n : 0));
+}
+
+static void dispatch(HTTPServer *srv, HTTPRequest *req, HTTPResponse *res)
+{
+    http_buf_t allow = {0};
+    bool path_matched = false;
+
+    for (size_t i = 0; i < srv->route_len; i++)
+    {
+        const http_route_t *r = &srv->routes[i];
+
+        if (req->params != nullptr)
+            map_clear(&req->params->table);
+
+        if (!route_match(r, req))
+            continue;
+
+        if (route_method_ok(r, req))
+        {
+            http_buf_free(&allow);
+            r->fn(req, res, r->user);
+            return;
+        }
+
+        path_matched = true;
+        if (r->method != nullptr)
+        {
+            allow_add(&allow, r->method);
+            if (strcmp(r->method, "GET") == 0)
+                allow_add(&allow, "HEAD");
+        }
+    }
+
+    if (req->params != nullptr)
+        map_clear(&req->params->table);
+
+    if (path_matched)
+    {
+        if (allow.len > 0)
+            CALL2(res, set_header, "Allow", (const char *)allow.data);
+        send_simple(res, 405);
+    }
+    else if (srv->fallback != nullptr)
+    {
+        srv->fallback(req, res, srv->fallback_user);
+    }
+    else
+    {
+        send_simple(res, 404);
+    }
+
+    http_buf_free(&allow);
+}
+
+static bool valid_method(const char *s, size_t n)
+{
+    if (n == 0 || n > 24)
+        return false;
+    for (size_t i = 0; i < n; i++)
+        if (!http__is_token_char((u8)s[i]))
+            return false;
+    return true;
+}
+
+static int parse_request_line(HTTPRequest *req, char *line, size_t len)
+{
+    char *sp1 = (char *)http__memchr(line, ' ', len);
+    if (sp1 == nullptr)
+        return 400;
+
+    size_t mlen = (size_t)(sp1 - line);
+    if (!valid_method(line, mlen))
+        return 400;
+
+    char *target = sp1 + 1;
+    size_t rest = len - mlen - 1;
+    char *sp2 = (char *)http__memchr(target, ' ', rest);
+    if (sp2 == nullptr)
+        return 400;
+
+    size_t tlen = (size_t)(sp2 - target);
+    char *ver = sp2 + 1;
+    size_t vlen = rest - tlen - 1;
+
+    if (tlen == 0)
+        return 400;
+    for (size_t i = 0; i < tlen; i++)
+        if ((u8)target[i] <= 0x20 || (u8)target[i] == 0x7f)
+            return 400;
+
+    if (vlen != 8 || memcmp(ver, "HTTP/", 5) != 0 || ver[6] != '.' ||
+        !http__is_digit((u8)ver[5]) || !http__is_digit((u8)ver[7]))
+        return 400;
+    if (ver[5] != '1')
+        return 505;
+    if (ver[7] != '0' && ver[7] != '1')
+        return 505;
+
+    req->version_minor = ver[7] - '0';
+
+    const char *t = target;
+    size_t tl = tlen;
+    if (tl > 7 && http__ieq_n(t, 7, "http://"))
+    {
+        t += 7; tl -= 7;
+    }
+    else if (tl > 8 && http__ieq_n(t, 8, "https://"))
+    {
+        t += 8; tl -= 8;
+    }
+    else
+    {
+        goto origin;
+    }
+    {
+        size_t i = 0;
+        while (i < tl && t[i] != '/' && t[i] != '?')
+            i++;
+        if (i == 0)
+            return 400;
+        if (i == tl || t[i] == '?')
+        {
+            dstr_t tg = dstr_new("/");
+            dstr_append(&tg, t + i);
+            req->target = tg;
+            t = req->target.data;
+            tl = req->target.len;
+            goto have_target;
+        }
+        t += i;
+        tl -= i;
+    }
+
+origin:
+    if (t[0] != '/' && !(tl == 1 && t[0] == '*'))
+        return 400;
+
+    if (req->target.data == nullptr)
+    {
+        char *c = http__strdup_n(t, tl);
+        if (c == nullptr)
+            return 500;
+        req->target.data = c;
+        req->target.len = tl;
+        req->target.cap = tl;
+    }
+
+have_target:
+    {
+        const char *tg = req->target.data;
+        size_t n = req->target.len;
+        size_t q = 0;
+        while (q < n && tg[q] != '?')
+            q++;
+
+        char *pc = http__strdup_n(tg, q);
+        char *qc = http__strdup_n(q < n ? tg + q + 1 : "", q < n ? n - q - 1 : 0);
+        if (pc == nullptr || qc == nullptr)
+        {
+            free(pc);
+            free(qc);
+            return 500;
+        }
+
+        req->path.data = pc;  req->path.len = q;                       req->path.cap = q;
+        req->query.data = qc; req->query.len = q < n ? n - q - 1 : 0;  req->query.cap = req->query.len;
+    }
+
+    req->method.data = http__strdup_n(line, mlen);
+    if (req->method.data == nullptr)
+        return 500;
+    req->method.len = req->method.cap = mlen;
+    return 0;
+}
+
+static int read_request(HTTPServer *srv, HTTPConnection *conn, HTTPRequest *req, u64 start_ms)
+{
+    char *line;
+    size_t len;
+    int r;
+
+    size_t budget = srv->max_header_bytes;
+
+    for (int blank = 0;; blank++)
+    {
+        r = http__next_line(conn, &line, &len, budget);
+        if (r == HTTP_LINE_TOO_LONG) return 414;
+        if (r != HTTP_LINE_OK)       return http__fail_code(conn);
+        if (len > 0)
+            break;
+        if (blank >= 4)
+            return 400;
+    }
+
+    if (len + 2 > budget)
+        return 414;
+    budget -= len + 2;
+
+    int rc = parse_request_line(req, line, len);
+    if (rc != 0)
+        return rc;
+
+    if (req->headers == nullptr)
+        return 500;
+
+    rc = http__read_headers(conn, req->headers, &budget);
+    if (rc != 0)
+        return rc;
+
+    if (req->version_minor >= 1 && http__map_get(req->headers, "host") == nullptr)
+        return 400;
+
+    http_body_kind kind;
+    u64 length;
+    rc = http__body_framing(req->headers, true, req->version_minor, &kind, &length);
+    if (rc != 0)
+        return rc;
+
+    const char *cn = http__map_get(req->headers, "connection");
+    req->keep_alive = req->version_minor >= 1 ? !http__list_has(cn, "close")
+                                              : http__list_has(cn, "keep-alive");
+
+    if (kind == HTTP_BODY_LENGTH && length > (u64)srv->max_body_bytes)
+        return 413;
+
+    const char *expect = http__map_get(req->headers, "expect");
+    if (expect != nullptr)
+    {
+        if (!http__ieq(expect, "100-continue"))
+            return 417;
+        if (req->version_minor >= 1 && kind != HTTP_BODY_NONE && conn->rlen == conn->rpos)
+        {
+            if (!CALL2(conn, write_all, "HTTP/1.1 100 Continue\r\n\r\n", 25))
+                return HTTP_PARSE_IOERR;
+        }
+    }
+
+    CALL1(conn, set_deadline, start_ms + srv->request_timeout_ms);
+
+    rc = http__read_body(conn, kind, length, srv->max_body_bytes, &req->body, &req->body_len);
+    return rc;
+}
+
+static void send_error(HTTPConnection *conn, int code, bool allow_hdr)
+{
+    HTTPResponse *res = NEW(HTTPResponse);
+    if (res == nullptr)
+        return;
+
+    res->conn = conn;
+    res->keep_alive = false;
+    (void)allow_hdr;
+    send_simple(res, code);
+    REMOVE(res);
+}
+
+static void lingering_close(HTTPConnection *c)
+{
+    if (c->stream == nullptr)
+        return;
+
+    sock_shutdown_write(((SocketStream *)c->stream)->fd);
+    CALL1(c, set_deadline, clock_monotonic_ms() + 500);
+
+    size_t drained = 0;
+    c->io_error = c->eof = c->timed_out = false;
+
+    while (drained < 256 * 1024)
+    {
+        c->rpos = c->rlen = 0;
+        if (!http__wait_data(c))
+            break;
+        drained += c->rlen;
+    }
+}
+
+static bool under_pressure(HTTPServer *srv)
+{
+    u32 active = atomic_u32_load(&srv->active);
+    return active >= srv->nthreads - srv->nthreads / 4;
+}
+
+static void access_log(HTTPRequest *req, HTTPResponse *res, u64 t0)
+{
+    char ip[24] = "-";
+    CALL2(req, peer_ip, ip, sizeof(ip));
+    printf("%s \"%s %s\" %d %u %ums\n", ip, req->method.data, req->target.data,
+           res->status, (unsigned)res->bytes_out, (unsigned)(clock_monotonic_ms() - t0));
+}
+
+static void serve_connection(HTTPServer *srv, HTTPConnection *conn, const sock_addr_in_t *peer)
+{
+    u32 nreq = 0;
+    bool first = true;
+
+    while (!atomic_bool_load(&srv->stopping))
+    {
+        bool pressure = under_pressure(srv);
+        u32 idle = first ? srv->headers_timeout_ms : srv->keepalive_timeout_ms;
+        if (!first && pressure && idle > 1000)
+            idle = 1000;
+
+        CALL1(conn, set_deadline, clock_monotonic_ms() + idle);
+        if (!http__wait_data(conn))
+            break;
+
+        u64 t0 = clock_monotonic_ms();
+        CALL1(conn, set_deadline, t0 + srv->headers_timeout_ms);
+
+        HTTPRequest *req = NEW(HTTPRequest);
+        if (req == nullptr)
+            break;
+
+        int rc = read_request(srv, conn, req, t0);
+        if (rc != 0)
+        {
+            REMOVE(req);
+            if (rc == HTTP_PARSE_TIMEOUT)
+                rc = 408;
+            if (rc > 0)
+            {
+                send_error(conn, rc, false);
+                lingering_close(conn);
+            }
+            break;
+        }
+
+        req->has_peer = peer != nullptr;
+        if (peer != nullptr)
+            req->peer = *peer;
+
+        HTTPResponse *res = NEW(HTTPResponse);
+        if (res == nullptr)
+        {
+            REMOVE(req);
+            break;
+        }
+
+        res->conn = conn;
+        res->version_minor = req->version_minor;
+        res->keepalive_s = srv->keepalive_timeout_ms / 1000;
+        res->is_head_request = strcmp(req->method.data, "HEAD") == 0;
+        res->keep_alive = req->keep_alive && !atomic_bool_load(&srv->stopping) &&
+                          !under_pressure(srv) && (nreq + 1 < srv->max_requests_per_conn);
+
+        CALL1(conn, set_deadline, 0);
+
+        dispatch(srv, req, res);
+        if (!res->ended)
+            CALL0(res, end);
+
+        nreq++;
+        atomic_u64_fetch_add(&srv->served, 1);
+
+        if (srv->access_log)
+            access_log(req, res, t0);
+
+        bool keep = res->keep_alive && !res->failed && !conn->io_error;
+
+        REMOVE(res);
+        REMOVE(req);
+
+        if (!keep)
+            break;
+
+        first = false;
+    }
+}
+
+static void *worker_main(void *arg)
+{
+    HTTPServer *srv = (HTTPServer *)arg;
+
+    HTTPConnection *conn = NEW(HTTPConnection);
+    if (conn == nullptr)
+        return nullptr;
+
+    conn->cancel = &srv->stopping;
+
+    while (!atomic_bool_load(&srv->stopping))
+    {
+        sock_addr_in_t peer;
+        memset(&peer, 0, sizeof(peer));
+
+        Stream *cs = tcp_accept(srv->listener, &peer);
+
+        if (cs == nullptr)
+        {
+            if (atomic_bool_load(&srv->stopping) || srv->listener->fd == SOCK_INVALID)
+                break;
+
+            i32 err = sock_last_error();
+            if (sock_error_is_exhausted(err))
+                thread_sleep_ms(50);
+            else if (!sock_error_is_timeout(err) && !sock_error_is_interrupted(err))
+                thread_sleep_ms(2);
+            continue;
+        }
+
+        atomic_u32_fetch_add(&srv->active, 1);
+
+        sock_set_nodelay(((SocketStream *)cs)->fd, true);
+        sock_set_send_timeout(((SocketStream *)cs)->fd, srv->send_timeout_ms);
+
+        CALL1(conn, accept, cs);
+        serve_connection(srv, conn, &peer);
+        CALL0(conn, close);
+
+        atomic_u32_fetch_sub(&srv->active, 1);
+    }
+
+    REMOVE(conn);
+    return nullptr;
+}
+
+IMPLEMENT(HTTPServer, bool, listen, (void *self, u32 bind_addr, u16 port))
+{
+    HTTPServer *this = (HTTPServer *)self;
+
+    if (atomic_bool_load(&this->running))
+        return false;
+
+    if (this->listener)
+    {
+        REMOVE(this->listener);
+        this->listener = nullptr;
+    }
+
+    u32 n = this->workers;
+    if (n < 1) n = 1;
+    if (n > HTTP_MAX_WORKERS) n = HTTP_MAX_WORKERS;
+    this->workers = n;
+
+    this->listener = tcp_listen(bind_addr, port, HTTP_LISTEN_BACKLOG);
+    if (this->listener == nullptr)
+        return false;
+
+    sock_set_recv_timeout(this->listener->fd, 500);
+
+    this->threads = (thread_t *)calloc(n, sizeof(thread_t));
+    if (this->threads == nullptr)
+    {
+        REMOVE(this->listener);
+        this->listener = nullptr;
+        return false;
+    }
+
+    atomic_bool_store(&this->stopping, false);
+    atomic_u32_store(&this->active, 0);
+    this->nthreads = n;
+
+    u32 started = 0;
+    for (u32 i = 0; i < n; i++)
+    {
+        if (thread_create(&this->threads[started], worker_main, this, nullptr) != THREAD_SUCCESS)
+            break;
+        started++;
+    }
+
+    if (started == 0)
+    {
+        free(this->threads);
+        this->threads = nullptr;
+        this->nthreads = 0;
+        REMOVE(this->listener);
+        this->listener = nullptr;
+        return false;
+    }
+
+    this->nthreads = started;
+    atomic_bool_store(&this->running, true);
+    return true;
+}
+
+IMPLEMENT(HTTPServer, void, stop, (void *self))
+{
+    HTTPServer *this = (HTTPServer *)self;
+
+    atomic_bool_store(&this->stopping, true);
+    if (this->listener)
+        sock_listener_interrupt(this->listener->fd);
+}
+
+IMPLEMENT(HTTPServer, void, wait, (void *self))
+{
+    HTTPServer *this = (HTTPServer *)self;
+
+    if (!atomic_bool_exchange(&this->running, false))
+        return;
+
+    for (u32 i = 0; i < this->nthreads; i++)
+        thread_join(this->threads[i], nullptr);
+
+    free(this->threads);
+    this->threads = nullptr;
+    this->nthreads = 0;
+
+    if (this->listener)
+    {
+        REMOVE(this->listener);
+        this->listener = nullptr;
+    }
+}

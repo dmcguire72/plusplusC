@@ -1,0 +1,239 @@
+// ++C Runtime Library (xxCRT)
+// Copyright 2026 Daniel McGuire
+// Licensed under the MIT License
+
+#ifndef HTTP_CONNECTION_H
+#define HTTP_CONNECTION_H
+
+#include <class.pph>
+#include <stream.pph>
+#include <socket.pph>
+#include <map.pph>
+#include <dstr.h>
+#include <atomic.h>
+#include <thread.h>
+
+#define HTTP_RBUF_INITIAL      ((size_t)8192)
+#define HTTP_CANCEL_SLICE_MS   250u
+#define HTTP_RCV_UNKNOWN       0xFFFFFFFFu
+
+#define HTTP_DEFAULT_MAX_HEADER_BYTES   ((size_t)16 * 1024)
+#define HTTP_DEFAULT_MAX_BODY_BYTES     ((size_t)8 * 1024 * 1024)
+#define HTTP_MAX_HEADER_COUNT           100
+
+const char *http_status_text(int code);
+const char *http_mime_type(const char *path);
+size_t http_format_date(char *buf, size_t cap, u64 unix_ms);
+bool http_url_decode(const char *s, size_t n, bool plus_as_space, dstr_t *out);
+
+typedef struct {
+    int     status;
+    dstr_t  reason;
+    Map    *headers;
+    u8     *body;
+    size_t  body_len;
+} http_response_t;
+
+void        http_response_free(http_response_t *r);
+const char *http_response_header(const http_response_t *r, const char *name);
+
+CLASS(HTTPConnection)
+{
+    FIELD(Stream *, stream)
+
+    FIELD(u8 *,   rbuf)
+    FIELD(size_t, rpos)
+    FIELD(size_t, rlen)
+    FIELD(size_t, rcap)
+
+    FIELD(u64,  deadline_ms)
+    FIELD(u32,  rcv_timeout_ms)
+    FIELD(bool, timed_out)
+    FIELD(bool, io_error)
+    FIELD(bool, eof)
+    FIELD(bool, cancelled)
+    FIELD(bool, last_was_head)
+    FIELD(const atomic_bool_t *, cancel)
+
+    METHOD(bool,   connect,         (void *self, const char *host, u16 port))
+    METHOD(void,   accept,          (void *self, Stream *client_stream))
+    METHOD(void,   close,           (void *self))
+
+    METHOD(void,   set_deadline,    (void *self, u64 absolute_ms))
+
+    METHOD(bool,   send_request,    (void *self, const char *method, const char *path, const char *host))
+    METHOD(bool,   send_request_ex, (void *self, const char *method, const char *path, const char *host,
+                                     const char *extra_headers, const void *body, size_t body_len))
+    METHOD(bool,   send_response,   (void *self, int status_code, const char *content_type, const char *body))
+
+    METHOD(dstr_t, read_line,       (void *self))
+    METHOD(dstr_t, read_body,       (void *self))
+    METHOD(bool,   read_response,   (void *self, http_response_t *out, size_t max_body))
+
+    METHOD(bool,   write_all,       (void *self, const void *buf, size_t len))
+};
+
+CLASS_EXPORT(HTTPConnection);
+
+METHOD_PROTO(HTTPConnection, bool,   connect,         (void *self, const char *host, u16 port));
+METHOD_PROTO(HTTPConnection, void,   accept,          (void *self, Stream *client_stream));
+METHOD_PROTO(HTTPConnection, void,   close,           (void *self));
+METHOD_PROTO(HTTPConnection, void,   set_deadline,    (void *self, u64 absolute_ms));
+METHOD_PROTO(HTTPConnection, bool,   send_request,    (void *self, const char *method, const char *path, const char *host));
+METHOD_PROTO(HTTPConnection, bool,   send_request_ex, (void *self, const char *method, const char *path, const char *host,
+                                                       const char *extra_headers, const void *body, size_t body_len));
+METHOD_PROTO(HTTPConnection, bool,   send_response,   (void *self, int status_code, const char *content_type, const char *body));
+METHOD_PROTO(HTTPConnection, dstr_t, read_line,       (void *self));
+METHOD_PROTO(HTTPConnection, dstr_t, read_body,       (void *self));
+METHOD_PROTO(HTTPConnection, bool,   read_response,   (void *self, http_response_t *out, size_t max_body));
+METHOD_PROTO(HTTPConnection, bool,   write_all,       (void *self, const void *buf, size_t len));
+
+CLASS(HTTPRequest)
+{
+    FIELD(dstr_t, method)
+    FIELD(dstr_t, target)
+    FIELD(dstr_t, path)
+    FIELD(dstr_t, query)
+    FIELD(int,    version_minor)
+    FIELD(Map *,  headers)
+    FIELD(Map *,  params)
+    FIELD(u8 *,   body)
+    FIELD(size_t, body_len)
+    FIELD(bool,   keep_alive)
+    FIELD(bool,   has_peer)
+    FIELD(sock_addr_in_t, peer)
+    FIELD(void *, user)
+
+    METHOD(const char *, header,      (void *self, const char *name))
+    METHOD(const char *, param,       (void *self, const char *name))
+    METHOD(dstr_t,       query_param, (void *self, const char *name))
+    METHOD(bool,         is,          (void *self, const char *method))
+    METHOD(bool,         peer_ip,     (void *self, char *buf, size_t cap))
+};
+
+CLASS_EXPORT(HTTPRequest);
+
+METHOD_PROTO(HTTPRequest, const char *, header,      (void *self, const char *name));
+METHOD_PROTO(HTTPRequest, const char *, param,       (void *self, const char *name));
+METHOD_PROTO(HTTPRequest, dstr_t,       query_param, (void *self, const char *name));
+METHOD_PROTO(HTTPRequest, bool,         is,          (void *self, const char *method));
+METHOD_PROTO(HTTPRequest, bool,         peer_ip,     (void *self, char *buf, size_t cap));
+
+typedef struct {
+    char *name;
+    char *value;
+} http_header_t;
+
+CLASS(HTTPResponse)
+{
+    FIELD(HTTPConnection *, conn)
+    FIELD(int,  status)
+    FIELD(int,  version_minor)
+    FIELD(u32,  keepalive_s)
+
+    FIELD(http_header_t *, hdrs)
+    FIELD(size_t, hdr_len)
+    FIELD(size_t, hdr_cap)
+
+    FIELD(bool, is_head_request)
+    FIELD(bool, keep_alive)
+    FIELD(bool, head_sent)
+    FIELD(bool, ended)
+    FIELD(bool, failed)
+    FIELD(bool, chunked)
+    FIELD(bool, suppress_body)
+    FIELD(i64,  declared_len)
+    FIELD(u64,  body_written)
+    FIELD(u64,  bytes_out)
+
+    METHOD(void,         set_status,  (void *self, int code))
+    METHOD(bool,         set_header,  (void *self, const char *name, const char *value))
+
+    METHOD(bool,         add_header,  (void *self, const char *name, const char *value))
+    METHOD(const char *, get_header,  (void *self, const char *name))
+
+    METHOD(bool,         write_head,  (void *self))
+    METHOD(bool,         write,       (void *self, const void *data, size_t len))
+    METHOD(bool,         end,         (void *self))
+
+    METHOD(bool,         send,        (void *self, int status, const char *content_type, const void *body, size_t len))
+    METHOD(bool,         send_text,   (void *self, int status, const char *content_type, const char *body))
+    METHOD(bool,         send_file,   (void *self, const char *path, const char *content_type))
+    METHOD(bool,         redirect,    (void *self, int status, const char *location))
+};
+
+CLASS_EXPORT(HTTPResponse);
+
+METHOD_PROTO(HTTPResponse, void,         set_status, (void *self, int code));
+METHOD_PROTO(HTTPResponse, bool,         set_header, (void *self, const char *name, const char *value));
+METHOD_PROTO(HTTPResponse, bool,         add_header, (void *self, const char *name, const char *value));
+METHOD_PROTO(HTTPResponse, const char *, get_header, (void *self, const char *name));
+METHOD_PROTO(HTTPResponse, bool,         write_head, (void *self));
+METHOD_PROTO(HTTPResponse, bool,         write,      (void *self, const void *data, size_t len));
+METHOD_PROTO(HTTPResponse, bool,         end,        (void *self));
+METHOD_PROTO(HTTPResponse, bool,         send,       (void *self, int status, const char *content_type, const void *body, size_t len));
+METHOD_PROTO(HTTPResponse, bool,         send_text,  (void *self, int status, const char *content_type, const char *body));
+METHOD_PROTO(HTTPResponse, bool,         send_file,  (void *self, const char *path, const char *content_type));
+METHOD_PROTO(HTTPResponse, bool,         redirect,   (void *self, int status, const char *location));
+
+void http_serve_static(HTTPRequest *req, HTTPResponse *res, const char *root, const char *prefix);
+
+typedef void (*http_handler_fn)(HTTPRequest *req, HTTPResponse *res, void *user);
+
+typedef struct {
+    char           *method;
+    char           *pattern;
+    bool            prefix;
+    http_handler_fn fn;
+    void           *user;
+} http_route_t;
+
+CLASS(HTTPServer)
+{
+
+    FIELD(u32,    workers)
+    FIELD(size_t, max_header_bytes)
+    FIELD(size_t, max_body_bytes)
+    FIELD(u32,    headers_timeout_ms)
+    FIELD(u32,    request_timeout_ms)
+    FIELD(u32,    keepalive_timeout_ms)
+    FIELD(u32,    send_timeout_ms)
+    FIELD(u32,    max_requests_per_conn)
+    FIELD(bool,   access_log)
+
+    FIELD(SocketStream *,  listener)
+    FIELD(thread_t *,      threads)
+    FIELD(u32,             nthreads)
+    FIELD(http_route_t *,  routes)
+    FIELD(size_t,          route_len)
+    FIELD(size_t,          route_cap)
+    FIELD(http_handler_fn, fallback)
+    FIELD(void *,          fallback_user)
+    FIELD(atomic_bool_t,   stopping)
+    FIELD(atomic_bool_t,   running)
+    FIELD(atomic_u32_t,    active)
+    FIELD(atomic_u64_t,    served)
+
+    METHOD(void, set_handler, (void *self, http_handler_fn fn, void *user))
+    METHOD(bool, route,       (void *self, const char *method, const char *pattern, http_handler_fn fn, void *user))
+    METHOD(bool, listen,      (void *self, u32 bind_addr, u16 port))
+    METHOD(u16,  port,        (void *self))
+    METHOD(void, wait,        (void *self))
+    METHOD(void, stop,        (void *self))
+
+    METHOD(u64,  requests_served,    (void *self))
+    METHOD(u32,  active_connections, (void *self))
+};
+
+CLASS_EXPORT(HTTPServer);
+
+METHOD_PROTO(HTTPServer, void, set_handler,        (void *self, http_handler_fn fn, void *user));
+METHOD_PROTO(HTTPServer, bool, route,              (void *self, const char *method, const char *pattern, http_handler_fn fn, void *user));
+METHOD_PROTO(HTTPServer, bool, listen,             (void *self, u32 bind_addr, u16 port));
+METHOD_PROTO(HTTPServer, u16,  port,               (void *self));
+METHOD_PROTO(HTTPServer, void, wait,               (void *self));
+METHOD_PROTO(HTTPServer, void, stop,               (void *self));
+METHOD_PROTO(HTTPServer, u64,  requests_served,    (void *self));
+METHOD_PROTO(HTTPServer, u32,  active_connections, (void *self));
+
+#endif /* HTTP_CONNECTION_H */

@@ -13,6 +13,7 @@ extern "C" {
 
 u64 clock_monotonic_ns(void);
 u64 clock_monotonic_ms(void);
+u64 clock_realtime_ms(void);
 
 #ifdef __cplusplus
 }

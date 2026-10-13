@@ -38,6 +38,7 @@ thread_t thread_self(void);
 bool     thread_equal(thread_t a, thread_t b);
 u32      thread_current_id(void);
 u32      thread_id(thread_t t);
+u32      thread_processor_count(void);
 
 void     XXC_NORETURN thread_exit(void *retval);
 

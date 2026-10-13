@@ -1,0 +1,266 @@
+#include <app.pph>
+#include <ios.pph>
+#include <cio.h>
+#include <str.h>
+#include <http.pph>
+#include <sig.h>
+#include <atexit.h>
+#include <atomic.h>
+#include <thread.h>
+#include <clock.h>
+
+CLASS(HTTPDemo, Application)
+{
+    BASE(Application)
+
+    METHOD(void, run_server, (void *self))
+    METHOD(void, run_client, (void *self))
+};
+
+CLASS_EXPORT(HTTPDemo);
+
+METHOD_PROTO(HTTPDemo, void, configure_args, (void *self));
+METHOD_PROTO(HTTPDemo, int,  run,            (void *self));
+METHOD_PROTO(HTTPDemo, void, run_server,     (void *self));
+METHOD_PROTO(HTTPDemo, void, run_client,     (void *self));
+
+CLASS_INFO(HTTPDemo, Application);
+
+static HTTPServer *volatile g_server = nullptr;
+static atomic_u8_t g_interrupt_count = ATOMIC_INIT(0);
+
+static void handle_sigint(int sig)
+{
+    (void)sig;
+
+    if (atomic_u8_fetch_add(&g_interrupt_count, 1) >= 1)
+        _exit(130);
+
+    HTTPServer *srv = g_server;
+    if (srv)
+        CALL0(srv, stop);
+}
+
+int program(parr_t csArgs)
+{
+    atomic_u8_init(&g_interrupt_count, 0);
+    if (signal(SIGINT, handle_sigint) == SIG_ERR)
+        return 1;
+
+    HTTPDemo *app = NEW(HTTPDemo);
+    Application *base = AS(Application, app);
+
+    CALL1(base, parse_args, &csArgs);
+    int exit_code = CALL0(base, main);
+
+    REMOVE(app);
+    return exit_code;
+}
+
+CONSTRUCTOR(HTTPDemo)
+{
+    SUPER_CTOR(self, Application);
+
+    METHOD_LINK(base, HTTPDemo, configure_args);
+    METHOD_LINK(base, HTTPDemo, run);
+    METHOD_LINK(HTTPDemo, run_server);
+    METHOD_LINK(HTTPDemo, run_client);
+}
+
+DECONSTRUCTOR(HTTPDemo)
+{
+    SUPER_DTOR(self, Application);
+}
+
+IMPLEMENT(HTTPDemo, void, configure_args, (void *self))
+{
+    Application *base = AS(Application, self);
+
+    CALL2(base->args, add_flag, "server", "Run as the HTTP server");
+    CALL2(base->args, add_flag, "client", "Run as the HTTP client");
+    CALL2(base->args, add_value_flag, "port", "Port (default 8080)");
+    CALL2(base->args, add_value_flag, "root", "Directory served under /static (server)");
+    CALL2(base->args, add_value_flag, "path", "Request path (client, default /)");
+}
+
+static const char *g_root = nullptr;
+
+#include "index.inl"
+
+static void h_index(HTTPRequest *req, HTTPResponse *res, void *user)
+{
+    (void)req; (void)user;
+    dstr_t html_content = dstr_new("<!doctype html>\n<html lang=\"en\">\n");
+        dstr_append(&html_content, "<meta charset=\"utf-8\">\n"
+            "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
+            "<meta name=\"color-scheme\" content=\"dark\">\n"
+            "<title>++C Server Demo</title>\n");
+        dstr_append(&html_content, "\t<style>\n");
+            dstr_append(&html_content, index_css);
+        dstr_append(&html_content, "\t</style>\n");
+        dstr_append(&html_content, "\t<main>\n");
+            dstr_append(&html_content, index_main_html);
+        dstr_append(&html_content, "\t</main>\n");
+    dstr_append(&html_content, "</html>\n\n");
+    CALL3(res, send_text, 200, "text/html; charset=utf-8", html_content.data);
+    dstr_free(&html_content);
+}
+
+static void h_hello(HTTPRequest *req, HTTPResponse *res, void *user)
+{
+    (void)user;
+    char body[256];
+    const char *name = CALL1(req, param, "name");
+    int n = snprintf(body, sizeof(body), "Hello, %s!\n", name ? name : "?");
+    CALL4(res, send, 200, "text/plain; charset=utf-8", body, (size_t)n);
+}
+
+static void h_search(HTTPRequest *req, HTTPResponse *res, void *user)
+{
+    (void)user;
+    dstr_t q = CALL1(req, query_param, "q");
+    char body[512];
+    int n = snprintf(body, sizeof(body), "q = %s\n", q.data ? q.data : "(missing)");
+    dstr_free(&q);
+    CALL4(res, send, 200, "text/plain; charset=utf-8", body, (size_t)n);
+}
+
+static void h_echo(HTTPRequest *req, HTTPResponse *res, void *user)
+{
+    (void)user;
+    const char *ct = CALL1(req, header, "content-type");
+    CALL4(res, send, 200, ct ? ct : "application/octet-stream", req->body, req->body_len);
+}
+
+static void h_stream(HTTPRequest *req, HTTPResponse *res, void *user)
+{
+    (void)req; (void)user;
+    CALL2(res, set_header, "Content-Type", "text/plain; charset=utf-8");
+
+    for (int i = 1; i <= 5; i++)
+    {
+        char line[32];
+        int n = snprintf(line, sizeof(line), "chunk %d\n", i);
+        if (!CALL2(res, write, line, (size_t)n))
+            return;
+    }
+    CALL0(res, end);
+}
+
+static void h_stats(HTTPRequest *req, HTTPResponse *res, void *user)
+{
+    (void)req;
+    HTTPServer *srv = (HTTPServer *)user;
+    char body[128];
+    int n = snprintf(body, sizeof(body), "{\"requests\":%u,\"active\":%u}\n",
+                     (unsigned)CALL0(srv, requests_served), (unsigned)CALL0(srv, active_connections));
+    CALL4(res, send, 200, "application/json", body, (size_t)n);
+}
+
+static void h_static(HTTPRequest *req, HTTPResponse *res, void *user)
+{
+    (void)user;
+    http_serve_static(req, res, g_root, "/static");
+}
+
+static void h_not_found(HTTPRequest *req, HTTPResponse *res, void *user)
+{
+    (void)req; (void)user;
+    CALL3(res, send_text, 404, "text/plain; charset=utf-8", "nothing here\n");
+}
+
+IMPLEMENT(HTTPDemo, void, run_server, (void *self))
+{
+    Application *base = AS(Application, self);
+    int port = 8080;
+
+    const char *ps = CALL2(base->args, get_string, "port", "8080");
+    if (ps) { port = 0; while (*ps >= '0' && *ps <= '9') port = port * 10 + (*ps++ - '0'); }
+    g_root = CALL2(base->args, get_string, "root", nullptr);
+
+    HTTPServer *srv = NEW(HTTPServer);
+    srv->access_log = true;
+
+    CALL4(srv, route, "GET",  "/",             h_index,  nullptr);
+    CALL4(srv, route, "GET",  "/hello/:name",  h_hello,  nullptr);
+    CALL4(srv, route, "GET",  "/search",       h_search, nullptr);
+    CALL4(srv, route, "POST", "/echo",         h_echo,   nullptr);
+    CALL4(srv, route, "GET",  "/stream",       h_stream, nullptr);
+    CALL4(srv, route, "GET",  "/stats",        h_stats,  srv);
+    if (g_root)
+        CALL4(srv, route, "GET", "/static/*",  h_static, nullptr);
+    CALL2(srv, set_handler, h_not_found, nullptr);
+
+    if (!CALL2(srv, listen, SOCK_INADDR_ANY, (u16)port))
+    {
+        printf("Failed to listen on port %d.\n", port);
+        REMOVE(srv);
+        return;
+    }
+
+    printf("HTTP server listening on 0.0.0.0:%d (Ctrl+C to stop)\n", (int)CALL0(srv, port));
+    g_server = srv;
+    CALL0(srv, wait);
+    g_server = nullptr;
+
+    printf("Stopped after %u requests.\n", (unsigned)CALL0(srv, requests_served));
+    REMOVE(srv);
+}
+
+IMPLEMENT(HTTPDemo, void, run_client, (void *self))
+{
+    Application *base = AS(Application, self);
+    int port = 8080;
+
+    const char *ps = CALL2(base->args, get_string, "port", "8080");
+    if (ps) { port = 0; while (*ps >= '0' && *ps <= '9') port = port * 10 + (*ps++ - '0'); }
+    const char *path = CALL2(base->args, get_string, "path", "/");
+
+    printf("Connecting to 127.0.0.1:%d...\n", port);
+    HTTPConnection *conn = NEW(HTTPConnection);
+
+    if (CALL2(conn, connect, "127.0.0.1", (u16)port))
+    {
+        http_response_t resp;
+
+        CALL1(conn, set_deadline, clock_monotonic_ms() + 10000);
+        CALL3(conn, send_request, "GET", path, "127.0.0.1");
+
+        if (CALL2(conn, read_response, &resp, 16 * 1024 * 1024))
+        {
+            printf("--- %d %s ---\n", resp.status, resp.reason.data);
+            printf("Content-Type: %s\n", http_response_header(&resp, "content-type")
+                                         ? http_response_header(&resp, "content-type") : "(none)");
+            printf("--- BODY (%u bytes) ---\n%s\n", (unsigned)resp.body_len, (const char *)resp.body);
+            http_response_free(&resp);
+        }
+        else
+        {
+            printf("Failed to read a response.\n");
+        }
+    }
+    else
+    {
+        printf("Connection failed. Is the server running?\n");
+    }
+
+    REMOVE(conn);
+}
+
+IMPLEMENT(HTTPDemo, int, run, (void *self))
+{
+    HTTPDemo *this = (HTTPDemo *)self;
+    Application *base = AS(Application, self);
+
+    if (CALL1(base->args, get_bool, "server"))
+        CALL0(this, run_server);
+    else if (CALL1(base->args, get_bool, "client"))
+        CALL0(this, run_client);
+    else
+    {
+        printf("Please specify --server or --client.\n\n");
+        CALL0(base, print_help);
+    }
+
+    return 0;
+}

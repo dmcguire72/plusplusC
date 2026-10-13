@@ -156,6 +156,22 @@ if (XXC_BUILD_DEMO)
 
     xxc_freestanding_compile_options(xxc_demo_socket PRIVATE)
     xxc_freestanding_link_options(xxc_demo_socket)
+
+    add_executable(xxc_demo_http "${CMAKE_CURRENT_SOURCE_DIR}/examples/http-demo.ppc" ${XXC_EXEC_STARTUP} ${XXC_EXEC_CRT0})
+    set_target_properties(xxc_demo_http PROPERTIES OUTPUT_NAME http)
+    if (XXC_DEMO_USES_SHARED)
+        target_compile_definitions(xxc_demo_http PRIVATE XXC_USING_SHARED_LIB)
+    endif()
+    target_link_libraries(xxc_demo_http PRIVATE ${XXC_DEMO_LIB})
+    if (XXC_DEMO_USES_SHARED)
+        set_target_properties(xxc_demo_http PROPERTIES
+            BUILD_RPATH "${CMAKE_BINARY_DIR}"
+            INSTALL_RPATH "$ORIGIN"
+        )
+    endif()
+
+    xxc_freestanding_compile_options(xxc_demo_http PRIVATE)
+    xxc_freestanding_link_options(xxc_demo_http)
 endif()
 
 set(CPACK_GENERATOR "DEB")

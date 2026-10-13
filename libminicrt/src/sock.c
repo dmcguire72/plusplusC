@@ -353,27 +353,17 @@ i32 sock_getsockopt(sock_t s, i32 level, i32 optname, void *optval, sock_len_t *
 
 i32 sock_getsockname(sock_t s, sock_addr_in_t *out_addr)
 {
-    int addrlen = (int)sizeof(*out_addr);
-
+    int addrlen = (int)sizeof(sock_addr_in_t);
     if (getsockname(s, (struct sockaddr *)out_addr, &addrlen) == SOCKET_ERROR)
-    {
-        sock_set_last_error(WSAGetLastError());
         return -1;
-    }
-
     return 0;
 }
 
 i32 sock_getpeername(sock_t s, sock_addr_in_t *out_addr)
 {
-    int addrlen = (int)sizeof(*out_addr);
-
+    int addrlen = (int)sizeof(sock_addr_in_t);
     if (getpeername(s, (struct sockaddr *)out_addr, &addrlen) == SOCKET_ERROR)
-    {
-        sock_set_last_error(WSAGetLastError());
         return -1;
-    }
-
     return 0;
 }
 
@@ -397,6 +387,72 @@ i32 sock_close(sock_t s)
     }
 
     return 0;
+}
+
+bool sock_set_recv_timeout(sock_t s, u32 ms)
+{
+    DWORD timeout = ms;
+    if (setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout)) == SOCKET_ERROR)
+    {
+        sock_set_last_error(WSAGetLastError());
+        return false;
+    }
+    return true;
+}
+
+bool sock_set_send_timeout(sock_t s, u32 ms)
+{
+    DWORD timeout = ms;
+    if (setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout)) == SOCKET_ERROR)
+    {
+        sock_set_last_error(WSAGetLastError());
+        return false;
+    }
+    return true;
+}
+
+bool sock_timed_out(sock_t s)
+{
+    (void)s;
+    i32 err = sock_last_error();
+    return err == 10060;
+}
+
+u16 sock_local_port(sock_t s)
+{
+    sock_addr_in_t addr;
+    int len = (int)sizeof(addr); 
+    
+    if (getsockname(s, (struct sockaddr *)&addr, &len) == SOCKET_ERROR)
+    {
+        return 0;
+    }
+    return sock_ntohs(addr.sin_port);
+}
+
+void sock_shutdown_write(sock_t s)
+{
+    shutdown(s, SD_SEND);
+}
+
+void sock_listener_interrupt(sock_t s)
+{
+    shutdown(s, SD_BOTH);
+}
+
+bool sock_error_is_exhausted(i32 err)
+{
+    return err == 10055;
+}
+
+bool sock_error_is_timeout(i32 err)
+{
+    return err == 10060;
+}
+
+bool sock_error_is_interrupted(i32 err)
+{
+    return err == 10035;
 }
 
 #elif defined(XXC_RAWSYS)
@@ -639,6 +695,75 @@ i32 sock_close(sock_t s)
     return 0;
 }
 
+bool sock_set_recv_timeout(sock_t s, u32 ms)
+{
+    struct timeval tv;
+    tv.tv_sec = ms / 1000;
+    tv.tv_usec = (ms % 1000) * 1000;
+    if (sock_setsockopt(s, SOCK_SOL_SOCKET, SOCK_SO_RCVTIMEO, &tv, sizeof(tv)) != 0)
+    {
+        sock_set_last_error(sock_last_error());
+        return false;
+    }
+    return true;
+}
+
+bool sock_set_send_timeout(sock_t s, u32 ms)
+{
+    struct timeval tv;
+    tv.tv_sec = ms / 1000;
+    tv.tv_usec = (ms % 1000) * 1000;
+    if (sock_setsockopt(s, SOCK_SOL_SOCKET, SOCK_SO_SNDTIMEO, &tv, sizeof(tv)) != 0)
+    {
+        sock_set_last_error(sock_last_error());
+        return false;
+    }
+    return true;
+}
+
+bool sock_timed_out(sock_t s)
+{
+    (void)s;
+    i32 err = sock_last_error();
+    return err == 110;
+}
+
+u16 sock_local_port(sock_t s)
+{
+    sock_addr_in_t addr;
+    unsigned int len = sizeof(addr);
+    if (sys_getsockname(s, &addr, &len) < 0)
+    {
+        return 0;
+    }
+    return sock_ntohs(addr.sin_port);
+}
+
+void sock_shutdown_write(sock_t s)
+{
+    sys_shutdown(s, SOCK_SHUT_WR);
+}
+
+void sock_listener_interrupt(sock_t s)
+{
+    sys_shutdown(s, SOCK_SHUT_RDWR);
+}
+
+bool sock_error_is_exhausted(i32 err)
+{
+    return err == 12;
+}
+
+bool sock_error_is_timeout(i32 err)
+{
+    return err == 110;
+}
+
+bool sock_error_is_interrupted(i32 err)
+{
+    return err == 4;
+}
+
 #else
 
 bool sock_init(void) 
@@ -705,6 +830,40 @@ i32 sock_shutdown(sock_t s, i32 how)
 i32 sock_close(sock_t s) 
 { (void)s; 
     return -1; 
+}
+bool sock_set_recv_timeout(sock_t s, u32 ms) 
+{ (void)s; (void)ms; 
+    return false; 
+}
+bool sock_set_send_timeout(sock_t s, u32 ms) 
+{ (void)s; (void)ms; 
+    return false; 
+}
+bool sock_timed_out(sock_t s) 
+{ (void)s; 
+    return false; 
+}
+u16 sock_local_port(sock_t s) 
+{ (void)s; 
+    return 0; 
+}
+void sock_shutdown_write(sock_t s) 
+{ (void)s; 
+}
+void sock_listener_interrupt(sock_t s) 
+{ (void)s; 
+}
+bool sock_error_is_exhausted(i32 err) 
+{ (void)err; 
+    return false; 
+}
+bool sock_error_is_timeout(i32 err) 
+{ (void)err; 
+    return false; 
+}
+bool sock_error_is_interrupted(i32 err) 
+{ (void)err; 
+    return false; 
 }
 
 #endif

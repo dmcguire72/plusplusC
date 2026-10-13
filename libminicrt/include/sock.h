@@ -137,4 +137,15 @@ bool sock_set_reuseaddr(sock_t s, bool enable);
 
 bool sock_set_nodelay(sock_t s, bool enable);
 
+bool sock_set_recv_timeout(sock_t s, u32 ms);
+bool sock_set_send_timeout(sock_t s, u32 ms);
+bool sock_timed_out(sock_t s);
+u16 sock_local_port(sock_t s);
+void sock_shutdown_write(sock_t s);
+void sock_listener_interrupt(sock_t s);
+
+bool sock_error_is_exhausted(i32 err);
+bool sock_error_is_timeout(i32 err);
+bool sock_error_is_interrupted(i32 err);
+
 #endif /* SOCK_H */

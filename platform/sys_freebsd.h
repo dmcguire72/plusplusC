@@ -35,6 +35,7 @@
 #define XXC_SYS_sendto          133
 #define XXC_SYS_shutdown        134
 #define XXC_SYS_sysarch         165
+#define XXC_SYS___sysctl        202
 #define XXC_SYS_clock_gettime   232
 #define XXC_SYS_nanosleep       240
 #define XXC_SYS___getcwd        326
@@ -178,6 +179,8 @@ long sys_setsockopt(long sockfd, int level, int optname, const void *optval, uns
 long sys_getsockopt(long sockfd, int level, int optname, void *optval, unsigned int *optlen);
 long sys_getsockname(long sockfd, void *addr, unsigned int *addrlen);
 long sys_getpeername(long sockfd, void *addr, unsigned int *addrlen);
+
+long sys___sysctl(const int *name, unsigned int namelen, void *oldp, size_t *oldlenp, const void *newp, size_t newlen);
 
 typedef struct {
     void  (*start_func)(void *);

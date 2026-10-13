@@ -124,6 +124,15 @@ int sys_munmap(void *addr, size_t length)
     return (int)syscall(__NR_munmap, (long)addr, (long)length, 0);
 }
 
+long sys_sched_getaffinity(long pid, size_t cpusetsize, void *mask)
+{
+#if defined(__NR_sched_getaffinity)
+    return syscall(__NR_sched_getaffinity, pid, (long)cpusetsize, (long)mask);
+#else
+    return -XXC_ENOSYS;
+#endif
+}
+
 #if defined(__i386__) && !defined(__x86_64__) && defined(__NR_socketcall)
 #define XXC_USE_SOCKETCALL 1
 #endif

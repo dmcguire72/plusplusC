@@ -247,4 +247,9 @@ long sys_getpeername(long sockfd, void *addr, unsigned int *addrlen)
     return syscall(XXC_SYS_getpeername, sockfd, (long)addr, (long)addrlen);
 }
 
+long sys___sysctl(const int *name, unsigned int namelen, void *oldp, size_t *oldlenp, const void *newp, size_t newlen)
+{
+    return syscall(XXC_SYS___sysctl, (long)name, (long)namelen, (long)oldp, (long)oldlenp, (long)newp, (long)newlen);
+}
+
 XXC_NO_SSP_END

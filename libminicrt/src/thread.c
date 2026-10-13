@@ -59,6 +59,50 @@ int tls_key_delete(tls_key_t key)
 
 #include "sys_thread.h"
 
+#if defined(__linux__)
+static inline u32 count_bits64(u64 x)
+{
+    u32 count = 0;
+    while (x != 0)
+    {
+        count += (u32)(x & 1ull);
+        x >>= 1ull;
+    }
+    return count;
+}
+
+u32 thread_processor_count(void)
+{
+    u64 mask[16];
+    memset(mask, 0, sizeof(mask));
+
+    long r = sys_sched_getaffinity(0, sizeof(mask), mask);
+    if (r > 0)
+    {
+        u32 cpus = 0;
+        size_t words = (size_t)r / sizeof(u64);
+        for (size_t i = 0; i < words; i++)
+            cpus += count_bits64(mask[i]);
+
+        if (cpus > 0)
+            return cpus;
+    }
+    return 1;
+}
+#elif defined(__FreeBSD__)
+u32 thread_processor_count(void)
+{
+    int mib[2] = { 6, 3 };
+    int ncpu = 0;
+    size_t len = sizeof(ncpu);
+
+    if (sys___sysctl(mib, 2, &ncpu, &len, nullptr, 0) == 0 && ncpu > 0)
+        return (u32)ncpu;
+
+    return 1;
+}
+#endif
+
 #define XXC_THREAD_GUARD  ((size_t)65536)
 #define XXC_THREAD_MINSTK ((size_t)16384)
 
@@ -366,6 +410,13 @@ struct xxc_thread {
 };
 
 enum { WT_JOINABLE = 0, WT_DETACHED = 1, WT_EXITED = 2 };
+
+u32 thread_processor_count(void)
+{
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    return si.dwNumberOfProcessors > 0 ? (u32)si.dwNumberOfProcessors : 1u;
+}
 
 static DWORD self_index(void)
 {

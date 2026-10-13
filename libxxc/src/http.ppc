@@ -1,0 +1,230 @@
+// ++C Runtime Library (xxCRT)
+// Copyright 2026 Daniel McGuire
+// Licensed under the MIT License
+
+#include "http_internal.h"
+
+int http__fail_code(const HTTPConnection *c)
+{
+    if (c->cancelled) return HTTP_PARSE_CANCEL;
+    if (c->timed_out) return HTTP_PARSE_TIMEOUT;
+    if (c->io_error)  return HTTP_PARSE_IOERR;
+    if (c->eof)       return HTTP_PARSE_EOF;
+    return HTTP_PARSE_IOERR;
+}
+
+bool http__wait_data(HTTPConnection *c)
+{
+    if (c->rpos < c->rlen)
+        return true;
+
+    if (c->eof || c->io_error)
+        return false;
+
+    if (!conn_make_room(c, HTTP_RBUF_INITIAL))
+        return false;
+
+    return conn_recv(c) > 0;
+}
+
+int http__next_line(HTTPConnection *c, char **line, size_t *len, size_t max_len)
+{
+    size_t scanned = 0;
+
+    for (;;)
+    {
+        size_t avail = c->rlen - c->rpos;
+        u8 *start = c->rbuf ? c->rbuf + c->rpos : nullptr;
+
+        for (size_t i = scanned; i < avail; i++)
+        {
+            if (start[i] != '\n')
+                continue;
+
+            size_t l = i;
+            if (l > max_len)
+                return HTTP_LINE_TOO_LONG;
+
+            c->rpos += i + 1;
+            if (l > 0 && start[l - 1] == '\r')
+                l--;
+            start[l] = '\0';
+
+            *line = (char *)start;
+            *len = l;
+            return HTTP_LINE_OK;
+        }
+
+        scanned = avail;
+
+        if (avail > max_len)
+            return HTTP_LINE_TOO_LONG;
+
+        if (c->io_error)
+            return HTTP_LINE_ERR;
+        if (c->eof)
+            return avail == 0 ? HTTP_LINE_EOF : HTTP_LINE_ERR;
+
+        if (!conn_make_room(c, max_len + 2))
+            return HTTP_LINE_TOO_LONG;
+
+        if (conn_recv(c) < 0)
+            return HTTP_LINE_ERR;
+    }
+}
+
+bool http__read_exact(HTTPConnection *c, void *dst, size_t n)
+{
+    u8 *d = (u8 *)dst;
+
+    size_t avail = c->rlen - c->rpos;
+    size_t take = avail < n ? avail : n;
+    if (take > 0)
+    {
+        memcpy(d, c->rbuf + c->rpos, take);
+        c->rpos += take;
+        d += take;
+        n -= take;
+    }
+
+    while (n > 0)
+    {
+        i64 r = conn_read_raw(c, d, n);
+        if (r <= 0)
+            return false;
+        d += (size_t)r;
+        n -= (size_t)r;
+    }
+
+    return true;
+}
+
+Map *http__new_string_map(void)
+{
+    Map *m = NEW(Map);
+    if (m != nullptr)
+        CALL1(m, set_value_free, free);
+    return m;
+}
+
+void conn_set_rcv(HTTPConnection *c, u32 want_ms)
+{
+    u32 cur = c->rcv_timeout_ms;
+
+    if (cur != HTTP_RCV_UNKNOWN && cur >= want_ms && cur - want_ms < 25u)
+        return;
+    if (cur == want_ms)
+        return;
+
+    sock_set_recv_timeout(((SocketStream *)c->stream)->fd, want_ms);
+    c->rcv_timeout_ms = want_ms;
+}
+
+i64 conn_read_raw(HTTPConnection *c, void *dst, size_t n)
+{
+    if (c->stream == nullptr)
+    {
+        c->io_error = true;
+        return -1;
+    }
+
+    for (;;)
+    {
+        u32 want = 0;
+
+        if (c->deadline_ms != 0)
+        {
+            u64 now = clock_monotonic_ms();
+            if (now >= c->deadline_ms)
+            {
+                c->timed_out = true;
+                c->io_error = true;
+                return -1;
+            }
+            u64 rem = c->deadline_ms - now;
+            want = rem > 0x7fffffffull ? 0x7fffffffu : (u32)rem;
+        }
+
+        if (c->cancel != nullptr)
+        {
+            if (atomic_bool_load(c->cancel))
+            {
+                c->cancelled = true;
+                c->io_error = true;
+                return -1;
+            }
+            if (want == 0 || want > HTTP_CANCEL_SLICE_MS)
+                want = HTTP_CANCEL_SLICE_MS;
+        }
+
+        conn_set_rcv(c, want);
+
+        i64 r = CALL2(c->stream, read, dst, n);
+
+        if (r > 0)
+            return r;
+
+        if (r == 0)
+        {
+            c->eof = true;
+            return 0;
+        }
+
+        if (sock_timed_out(((SocketStream *)c->stream)->fd) && (c->deadline_ms != 0 || c->cancel != nullptr))
+            continue;
+
+        c->io_error = true;
+        if (sock_timed_out(((SocketStream *)c->stream)->fd))
+            c->timed_out = true;
+        return -1;
+    }
+}
+
+bool conn_make_room(HTTPConnection *c, size_t limit)
+{
+    if (c->rbuf == nullptr)
+    {
+        c->rbuf = (u8 *)malloc(HTTP_RBUF_INITIAL);
+        if (c->rbuf == nullptr)
+            return false;
+        c->rcap = HTTP_RBUF_INITIAL;
+        c->rpos = c->rlen = 0;
+    }
+
+    if (c->rpos == c->rlen)
+        c->rpos = c->rlen = 0;
+
+    if (c->rlen < c->rcap)
+        return true;
+
+    if (c->rpos > 0)
+    {
+        memmove(c->rbuf, c->rbuf + c->rpos, c->rlen - c->rpos);
+        c->rlen -= c->rpos;
+        c->rpos = 0;
+        return true;
+    }
+
+    if (c->rcap >= limit)
+        return false;
+
+    size_t ncap = c->rcap * 2;
+    if (ncap > limit)
+        ncap = limit;
+
+    u8 *p = (u8 *)realloc(c->rbuf, ncap);
+    if (p == nullptr)
+        return false;
+
+    c->rbuf = p;
+    c->rcap = ncap;
+    return true;
+}
+
+i64 conn_recv(HTTPConnection *c)
+{
+    i64 n = conn_read_raw(c, c->rbuf + c->rlen, c->rcap - c->rlen);
+    if (n > 0)
+        c->rlen += (size_t)n;
+    return n;
+}

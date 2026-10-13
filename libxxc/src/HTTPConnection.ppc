@@ -1,0 +1,692 @@
+// ++C Runtime Library (xxCRT)
+// Copyright 2026 Daniel McGuire
+// Licensed under the MIT License
+
+#include "http_internal.h"
+
+CLASS_INFO_ROOT(HTTPConnection);
+
+static void conn_reset(HTTPConnection *c)
+{
+    c->rpos = 0;
+    c->rlen = 0;
+    c->deadline_ms = 0;
+    c->rcv_timeout_ms = HTTP_RCV_UNKNOWN;
+    c->timed_out = false;
+    c->io_error = false;
+    c->eof = false;
+    c->cancelled = false;
+    c->last_was_head = false;
+}
+
+static void conn_drop_stream(HTTPConnection *c)
+{
+    if (c->stream)
+    {
+        CALL0(c->stream, close);
+        REMOVE(c->stream);
+        c->stream = nullptr;
+    }
+}
+
+CONSTRUCTOR(HTTPConnection)
+{
+    self->stream = nullptr;
+    self->rbuf = nullptr;
+    self->rcap = 0;
+    self->cancel = nullptr;
+    conn_reset(self);
+
+    METHOD_LINK(HTTPConnection, connect);
+    METHOD_LINK(HTTPConnection, accept);
+    METHOD_LINK(HTTPConnection, close);
+    METHOD_LINK(HTTPConnection, set_deadline);
+    METHOD_LINK(HTTPConnection, send_request);
+    METHOD_LINK(HTTPConnection, send_request_ex);
+    METHOD_LINK(HTTPConnection, send_response);
+    METHOD_LINK(HTTPConnection, read_line);
+    METHOD_LINK(HTTPConnection, read_body);
+    METHOD_LINK(HTTPConnection, read_response);
+    METHOD_LINK(HTTPConnection, write_all);
+}
+
+DECONSTRUCTOR(HTTPConnection)
+{
+    conn_drop_stream(self);
+    free(self->rbuf);
+    self->rbuf = nullptr;
+    self->rcap = 0;
+}
+
+IMPLEMENT(HTTPConnection, bool, connect, (void *self, const char *host, u16 port))
+{
+    HTTPConnection *this = (HTTPConnection *)self;
+    if (this->stream) return false;
+
+    this->stream = tcp_connect(host, port);
+    if (this->stream == nullptr)
+        return false;
+
+    conn_reset(this);
+    sock_set_nodelay(((SocketStream *)this->stream)->fd, true);
+    return true;
+}
+
+IMPLEMENT(HTTPConnection, void, accept, (void *self, Stream *client_stream))
+{
+    HTTPConnection *this = (HTTPConnection *)self;
+    conn_drop_stream(this);
+    this->stream = client_stream;
+    conn_reset(this);
+}
+
+IMPLEMENT(HTTPConnection, void, close, (void *self))
+{
+    HTTPConnection *this = (HTTPConnection *)self;
+    conn_drop_stream(this);
+    conn_reset(this);
+}
+
+IMPLEMENT(HTTPConnection, void, set_deadline, (void *self, u64 absolute_ms))
+{
+    HTTPConnection *this = (HTTPConnection *)self;
+    this->deadline_ms = absolute_ms;
+}
+
+IMPLEMENT(HTTPConnection, bool, write_all, (void *self, const void *buf, size_t len))
+{
+    HTTPConnection *this = (HTTPConnection *)self;
+
+    if (this->stream == nullptr)
+    {
+        this->io_error = true;
+        return false;
+    }
+
+    const u8 *p = (const u8 *)buf;
+
+    while (len > 0)
+    {
+        i64 w = CALL2(this->stream, write, p, len);
+        if (w <= 0)
+        {
+            this->io_error = true;
+            if (sock_timed_out(((SocketStream *)this->stream)->fd))
+                this->timed_out = true;
+            return false;
+        }
+        p += (size_t)w;
+        len -= (size_t)w;
+    }
+
+    return true;
+}
+
+static int merge_header(Map *h, const char *name, size_t nlen, const char *val, size_t vlen)
+{
+    char *existing = (char *)map_get(&h->table, name, nlen);
+
+    if (existing == nullptr)
+    {
+        char *copy = http__strdup_n(val, vlen);
+        if (copy == nullptr)
+            return 500;
+        if (!map_set(&h->table, name, nlen, copy))
+        {
+            free(copy);
+            return 500;
+        }
+        return 0;
+    }
+
+    if (http__ieq_n(name, nlen, "content-length"))
+        return (strlen(existing) == vlen && memcmp(existing, val, vlen) == 0) ? 0 : 400;
+
+    if (http__ieq_n(name, nlen, "host"))
+        return 400;
+
+    const char *sep = http__ieq_n(name, nlen, "cookie") ? "; " : ", ";
+    size_t slen = 2;
+    size_t elen = strlen(existing);
+
+    char *joined = (char *)malloc(elen + slen + vlen + 1);
+    if (joined == nullptr)
+        return 500;
+
+    memcpy(joined, existing, elen);
+    memcpy(joined + elen, sep, slen);
+    memcpy(joined + elen + slen, val, vlen);
+    joined[elen + slen + vlen] = '\0';
+
+    if (!map_set(&h->table, name, nlen, joined))
+    {
+        free(joined);
+        return 500;
+    }
+    return 0;
+}
+
+int http__read_headers(HTTPConnection *c, Map *headers, size_t *budget)
+{
+    int count = 0;
+
+    for (;;)
+    {
+        char *line;
+        size_t len;
+
+        int r = http__next_line(c, &line, &len, *budget);
+        if (r == HTTP_LINE_TOO_LONG)
+            return 431;
+        if (r != HTTP_LINE_OK)
+            return http__fail_code(c);
+
+        if (len + 2 > *budget)
+            return 431;
+        *budget -= len + 2;
+
+        if (len == 0)
+            return 0;
+
+        if (line[0] == ' ' || line[0] == '\t')
+            return 400;
+
+        if (++count > HTTP_MAX_HEADER_COUNT)
+            return 431;
+
+        char *colon = (char *)http__memchr(line, ':', len);
+        if (colon == nullptr || colon == line)
+            return 400;
+
+        size_t nlen = (size_t)(colon - line);
+        for (size_t i = 0; i < nlen; i++)
+        {
+            if (!http__is_token_char((u8)line[i]))
+                return 400;
+            line[i] = (char)http__lower((u8)line[i]);
+        }
+
+        char *v = colon + 1;
+        size_t vlen = len - nlen - 1;
+
+        while (vlen > 0 && http__is_ows((u8)*v)) { v++; vlen--; }
+        while (vlen > 0 && http__is_ows((u8)v[vlen - 1])) vlen--;
+
+        for (size_t i = 0; i < vlen; i++)
+            if (!http__valid_value_char((u8)v[i]))
+                return 400;
+
+        v[vlen] = '\0';
+
+        int mr = merge_header(headers, line, nlen, v, vlen);
+        if (mr != 0)
+            return mr;
+    }
+}
+
+int http__body_framing(Map *headers, bool is_request, int version_minor,
+                       http_body_kind *kind, u64 *length)
+{
+    const char *te = http__map_get(headers, "transfer-encoding");
+    const char *cl = http__map_get(headers, "content-length");
+
+    *length = 0;
+
+    if (te != nullptr && cl != nullptr)
+        return 400;
+
+    if (te != nullptr)
+    {
+        if (version_minor < 1)
+            return 400;
+        if (!http__ieq(te, "chunked"))
+            return 501;
+        *kind = HTTP_BODY_CHUNKED;
+        return 0;
+    }
+
+    if (cl != nullptr)
+    {
+        u64 v;
+        if (!http__parse_u64(cl, strlen(cl), &v))
+            return 400;
+        *kind = HTTP_BODY_LENGTH;
+        *length = v;
+        return 0;
+    }
+
+    *kind = is_request ? HTTP_BODY_NONE : HTTP_BODY_EOF;
+    return 0;
+}
+
+static int read_chunked(HTTPConnection *c, size_t max_body, http_buf_t *b)
+{
+    for (;;)
+    {
+        char *line;
+        size_t len;
+
+        int r = http__next_line(c, &line, &len, 1024);
+        if (r == HTTP_LINE_TOO_LONG)
+            return 400;
+        if (r != HTTP_LINE_OK)
+            return http__fail_code(c);
+
+        size_t i = 0;
+        u64 size = 0;
+        while (i < len && http__hexval((u8)line[i]) >= 0)
+        {
+            if (size > (0xFFFFFFFFFFFFFFFFull >> 4))
+                return 413;
+            size = (size << 4) | (u64)http__hexval((u8)line[i]);
+            i++;
+        }
+
+        if (i == 0)
+            return 400;
+
+        while (i < len && http__is_ows((u8)line[i]))
+            i++;
+        if (i < len && line[i] != ';')
+            return 400;
+
+        if (size == 0)
+        {
+            size_t budget = 8192;
+            for (;;)
+            {
+                r = http__next_line(c, &line, &len, budget);
+                if (r == HTTP_LINE_TOO_LONG)
+                    return 431;
+                if (r != HTTP_LINE_OK)
+                    return http__fail_code(c);
+                if (len == 0)
+                    return 0;
+                if (len + 2 > budget)
+                    return 431;
+                budget -= len + 2;
+            }
+        }
+
+        if (size > (u64)(max_body - b->len))
+            return 413;
+
+        if (!http_buf_reserve(b, (size_t)size))
+            return 500;
+
+        if (!http__read_exact(c, b->data + b->len, (size_t)size))
+            return http__fail_code(c);
+        b->len += (size_t)size;
+        b->data[b->len] = 0;
+
+        r = http__next_line(c, &line, &len, 16);
+        if (r == HTTP_LINE_TOO_LONG)
+            return 400;
+        if (r != HTTP_LINE_OK)
+            return http__fail_code(c);
+        if (len != 0)
+            return 400;
+    }
+}
+
+int http__read_body(HTTPConnection *c, http_body_kind kind, u64 length, size_t max_body,
+                    u8 **out, size_t *out_len)
+{
+    http_buf_t b = {0};
+    int rc = 0;
+
+    *out = nullptr;
+    *out_len = 0;
+
+    switch (kind)
+    {
+        case HTTP_BODY_NONE:
+            break;
+
+        case HTTP_BODY_LENGTH:
+            if (length > (u64)max_body)
+            {
+                rc = 413;
+                break;
+            }
+            if (length > 0)
+            {
+                if (!http_buf_reserve(&b, (size_t)length))
+                {
+                    rc = 500;
+                    break;
+                }
+                if (!http__read_exact(c, b.data, (size_t)length))
+                {
+                    rc = http__fail_code(c);
+                    break;
+                }
+                b.len = (size_t)length;
+                b.data[b.len] = 0;
+            }
+            break;
+
+        case HTTP_BODY_CHUNKED:
+            rc = read_chunked(c, max_body, &b);
+            break;
+
+        case HTTP_BODY_EOF:
+            for (;;)
+            {
+                size_t avail = c->rlen - c->rpos;
+                if (avail > 0)
+                {
+                    if (avail > max_body - b.len)
+                    {
+                        rc = 413;
+                        break;
+                    }
+                    if (!http_buf_append(&b, c->rbuf + c->rpos, avail))
+                    {
+                        rc = 500;
+                        break;
+                    }
+                    c->rpos = c->rlen;
+                }
+
+                if (c->eof)
+                    break;
+                if (c->io_error)
+                {
+                    rc = http__fail_code(c);
+                    break;
+                }
+                if (!conn_make_room(c, HTTP_RBUF_INITIAL))
+                {
+                    rc = 500;
+                    break;
+                }
+
+                i64 n = conn_recv(c);
+                if (n < 0)
+                {
+                    rc = http__fail_code(c);
+                    break;
+                }
+                if (n == 0)
+                    break;
+            }
+            break;
+    }
+
+    if (rc != 0)
+    {
+        http_buf_free(&b);
+        return rc;
+    }
+
+    if (b.data == nullptr)
+    {
+        b.data = (u8 *)calloc(1, 1);
+        if (b.data == nullptr)
+            return 500;
+    }
+
+    *out = b.data;
+    *out_len = b.len;
+    return 0;
+}
+
+IMPLEMENT(HTTPConnection, dstr_t, read_line, (void *self))
+{
+    HTTPConnection *this = (HTTPConnection *)self;
+    dstr_t out = {0};
+
+    char *line;
+    size_t len;
+
+    if (http__next_line(this, &line, &len, 64 * 1024) == HTTP_LINE_OK)
+        out = dstr_new(line);
+
+    return out;
+}
+
+IMPLEMENT(HTTPConnection, dstr_t, read_body, (void *self))
+{
+    HTTPConnection *this = (HTTPConnection *)self;
+    u8 *data = nullptr;
+    size_t len = 0;
+
+    dstr_t out = dstr_new("");
+
+    if (http__read_body(this, HTTP_BODY_EOF, 0, HTTP_DEFAULT_MAX_BODY_BYTES, &data, &len) == 0)
+    {
+        dstr_append(&out, (const char *)data);
+        free(data);
+    }
+
+    return out;
+}
+
+static bool is_token(const char *s)
+{
+    if (s == nullptr || *s == '\0')
+        return false;
+    for (; *s; s++)
+        if (!http__is_token_char((u8)*s))
+            return false;
+    return true;
+}
+
+static bool is_target(const char *s)
+{
+    if (s == nullptr || *s == '\0')
+        return false;
+    for (; *s; s++)
+        if ((u8)*s <= 0x20 || (u8)*s == 0x7f)
+            return false;
+    return true;
+}
+
+static bool block_has_header(const char *block, const char *name)
+{
+    if (block == nullptr)
+        return false;
+
+    size_t nlen = strlen(name);
+    const char *p = block;
+
+    while (*p)
+    {
+        if (http__ieq_n(p, nlen, name) && p[nlen] == ':')
+            return true;
+        while (*p && *p != '\n')
+            p++;
+        if (*p == '\n')
+            p++;
+    }
+    return false;
+}
+
+IMPLEMENT(HTTPConnection, bool, send_request_ex, (void *self, const char *method, const char *path,
+                                                  const char *host, const char *extra_headers,
+                                                  const void *body, size_t body_len))
+{
+    HTTPConnection *this = (HTTPConnection *)self;
+    if (!this->stream) return false;
+
+    if (!is_token(method) || !is_target(path) || !is_target(host))
+        return false;
+
+    http_buf_t b = {0};
+
+    http_buf_puts(&b, method);
+    http_buf_putc(&b, ' ');
+    http_buf_puts(&b, path);
+    http_buf_puts(&b, " HTTP/1.1\r\nHost: ");
+    http_buf_puts(&b, host);
+    http_buf_puts(&b, "\r\n");
+
+    if (extra_headers != nullptr && *extra_headers != '\0')
+    {
+        http_buf_puts(&b, extra_headers);
+        size_t n = strlen(extra_headers);
+        if (n < 2 || extra_headers[n - 2] != '\r' || extra_headers[n - 1] != '\n')
+            http_buf_puts(&b, "\r\n");
+    }
+
+    if (body_len > 0 || (method[0] == 'P' && method[1] != '\0'))
+    {
+        http_buf_puts(&b, "Content-Length: ");
+        http_buf_put_u64(&b, body_len);
+        http_buf_puts(&b, "\r\n");
+    }
+
+    if (!block_has_header(extra_headers, "connection"))
+        http_buf_puts(&b, "Connection: close\r\n");
+
+    http_buf_puts(&b, "\r\n");
+
+    if (body != nullptr && body_len > 0)
+        http_buf_append(&b, body, body_len);
+
+    bool ok = !b.oom && CALL2(this, write_all, b.data, b.len);
+    http_buf_free(&b);
+
+    this->last_was_head = (strcmp(method, "HEAD") == 0);
+    return ok;
+}
+
+IMPLEMENT(HTTPConnection, bool, send_request, (void *self, const char *method, const char *path, const char *host))
+{
+    return HTTPConnection__send_request_ex(self, method, path, host, nullptr, nullptr, 0);
+}
+
+IMPLEMENT(HTTPConnection, bool, send_response, (void *self, int status_code, const char *content_type, const char *body))
+{
+    HTTPConnection *this = (HTTPConnection *)self;
+    if (!this->stream) return false;
+
+    size_t blen = body ? strlen(body) : 0;
+    http_buf_t b = {0};
+    char date[40];
+
+    http_buf_puts(&b, "HTTP/1.1 ");
+    http_buf_put_u64(&b, (u64)(status_code > 0 ? status_code : 500));
+    http_buf_putc(&b, ' ');
+    http_buf_puts(&b, http_status_text(status_code));
+    http_buf_puts(&b, "\r\n");
+
+    if (http_format_date(date, sizeof(date), clock_realtime_ms()) > 0)
+    {
+        http_buf_puts(&b, "Date: ");
+        http_buf_puts(&b, date);
+        http_buf_puts(&b, "\r\n");
+    }
+
+    if (content_type != nullptr)
+    {
+        http_buf_puts(&b, "Content-Type: ");
+        http_buf_puts(&b, content_type);
+        http_buf_puts(&b, "\r\n");
+    }
+
+    http_buf_puts(&b, "Content-Length: ");
+    http_buf_put_u64(&b, (u64)blen);
+    http_buf_puts(&b, "\r\nConnection: close\r\n\r\n");
+
+    if (blen > 0)
+        http_buf_append(&b, body, blen);
+
+    bool ok = !b.oom && CALL2(this, write_all, b.data, b.len);
+    http_buf_free(&b);
+    return ok;
+}
+
+void http_response_free(http_response_t *r)
+{
+    if (r == nullptr)
+        return;
+
+    dstr_free(&r->reason);
+    if (r->headers != nullptr)
+        REMOVE(r->headers);
+    free(r->body);
+    memset(r, 0, sizeof(*r));
+}
+
+const char *http_response_header(const http_response_t *r, const char *name)
+{
+    char key[64];
+    size_t n = strlen(name);
+
+    if (r == nullptr || r->headers == nullptr || n >= sizeof(key))
+        return nullptr;
+
+    for (size_t i = 0; i < n; i++)
+        key[i] = (char)http__lower((u8)name[i]);
+    key[n] = '\0';
+
+    return http__map_get(r->headers, key);
+}
+
+IMPLEMENT(HTTPConnection, bool, read_response, (void *self, http_response_t *out, size_t max_body))
+{
+    HTTPConnection *this = (HTTPConnection *)self;
+
+    if (out == nullptr)
+        return false;
+
+    memset(out, 0, sizeof(*out));
+    int minor = 1;
+
+    for (;;)
+    {
+        char *line;
+        size_t len;
+
+        if (http__next_line(this, &line, &len, 8192) != HTTP_LINE_OK)
+            goto fail;
+
+        if (len < 12 || memcmp(line, "HTTP/1.", 7) != 0 ||
+            (line[7] != '0' && line[7] != '1') || line[8] != ' ' ||
+            !http__is_digit((u8)line[9]) || !http__is_digit((u8)line[10]) || !http__is_digit((u8)line[11]) ||
+            (len > 12 && line[12] != ' '))
+            goto fail;
+
+        minor = line[7] - '0';
+        out->status = (line[9] - '0') * 100 + (line[10] - '0') * 10 + (line[11] - '0');
+
+        dstr_free(&out->reason);
+        out->reason = dstr_new(len > 13 ? line + 13 : "");
+
+        if (out->headers != nullptr)
+            REMOVE(out->headers);
+        out->headers = http__new_string_map();
+        if (out->headers == nullptr)
+            goto fail;
+
+        size_t budget = HTTP_DEFAULT_MAX_HEADER_BYTES;
+        if (http__read_headers(this, out->headers, &budget) != 0)
+            goto fail;
+
+        if (out->status >= 100 && out->status < 200 && out->status != 101)
+            continue;
+        break;
+    }
+
+    {
+        http_body_kind kind = HTTP_BODY_NONE;
+        u64 length = 0;
+
+        bool no_body = this->last_was_head || out->status == 204 || out->status == 304 ||
+                       out->status == 101;
+
+        if (!no_body && http__body_framing(out->headers, false, minor, &kind, &length) != 0)
+            goto fail;
+
+        if (http__read_body(this, kind, length, max_body, &out->body, &out->body_len) != 0)
+            goto fail;
+    }
+
+    return true;
+
+fail:
+    http_response_free(out);
+    return false;
+}

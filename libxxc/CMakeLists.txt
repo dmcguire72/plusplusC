@@ -13,6 +13,10 @@ if (NOT TARGET xxc)
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Environment.ppc
         ${CMAKE_CURRENT_SOURCE_DIR}/src/ProcessStream.ppc
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Process.ppc
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/http.ppc
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/HTTPConnection.ppc
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/HTTPMessage.ppc
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/HTTPServer.ppc
     )
     set_source_files_properties(${XXC_SOURCES} PROPERTIES LANGUAGE C)
 
@@ -40,6 +44,7 @@ if (NOT TARGET xxc)
         ${CMAKE_CURRENT_SOURCE_DIR}/include/thread.pph
         ${CMAKE_CURRENT_SOURCE_DIR}/include/process.pph
         ${CMAKE_CURRENT_SOURCE_DIR}/include/environment.pph
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/http.pph
     )
     add_library(xxc::xxc ALIAS xxc)
 

@@ -94,6 +94,8 @@ long sys_clock_gettime(int clock_id, xxc_timespec_t *out);
 long sys_set_tid_address(int *tidptr);
 void sys_exit_thread(int status);
 
+long sys_sched_getaffinity(long pid, size_t cpusetsize, void *mask);
+
 void __xxc_platform_init(int argc, char **argv);
 
 extern char **__xxc_environ;
