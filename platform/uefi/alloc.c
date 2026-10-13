@@ -16,7 +16,7 @@ void *__uefi_malloc(size_t size)
     if (__uefi_st->BootServices->AllocatePool(EfiLoaderData, size + sizeof(hdr_t) + 16, &raw) != EFI_SUCCESS)
         return nullptr;
 
-    uintblock_t user = ((uintblock_t)raw + sizeof(hdr_t) + 15) & ~(uintblock_t)15;
+    uintptr_t user = ((uintptr_t)raw + sizeof(hdr_t) + 15) & ~(uintptr_t)15;
     hdr_t *h = (hdr_t *)user - 1;
     h->raw  = raw;
     h->size = size;
@@ -27,8 +27,6 @@ void *__uefi_calloc(size_t count, size_t size)
 {
     size_t total = count * size;
     if (count != 0 && total / count != size) return nullptr;
-    if (total == 0) total = 1; 
-
     void *p = __uefi_malloc(total);
     if (p) memset(p, 0, total);
     return p;
@@ -51,12 +49,11 @@ void *__uefi_realloc(void *block, size_t size)
     if (size == 0) { __uefi_free(block); return nullptr; }
 
     size_t old = __uefi_usable_size(block);
-    if (size <= old && size >= old / 2) return block;
+    if (size <= old) return block;
 
     void *n = __uefi_malloc(size);
     if (n == nullptr) return nullptr;
-    memcpy(n, block, old < size ? old : size);
-
+    memcpy(n, block, old);
     __uefi_free(block);
     return n;
 }

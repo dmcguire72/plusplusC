@@ -8,6 +8,8 @@
 
 #include <pe_initfini.h>
 
+extern void __xxc_ssp_init(void);
+
 volatile int _fltused = 0;
 
 static BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
@@ -24,10 +26,13 @@ static BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
     #define XXC_DLL_ENTRY _DllMainCRTStartup
 #endif
 
-BOOL WINAPI XXC_DLL_ENTRY(HINSTANCE hinst, DWORD reason, LPVOID reserved)
+XXC_NO_SSP BOOL WINAPI XXC_DLL_ENTRY(HINSTANCE hinst, DWORD reason, LPVOID reserved)
 {
     if (reason == DLL_PROCESS_ATTACH)
+    {
+        __xxc_ssp_init();
         xxc_pe_run_ctors();
+    }
 
     BOOL ok = DllMain(hinst, reason, reserved);
 

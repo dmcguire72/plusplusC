@@ -12,7 +12,7 @@ function(xxc_freestanding_compile_options target visibility)
                 -O3
                 -ffreestanding
                 -fno-builtin
-                -fstack-protector
+                -fstack-protector-strong
             )
         endif()
     elseif (LINUX OR XXC_FREEBSD)
@@ -22,7 +22,7 @@ function(xxc_freestanding_compile_options target visibility)
                 -flto
                 -ffreestanding
                 -fno-builtin
-                -fstack-protector
+                -fstack-protector-strong
                 -ftls-model=initial-exec
             )
 
@@ -38,8 +38,14 @@ endfunction()
 function(xxc_freestanding_link_options target)
     get_target_property(tgt_type ${target} TYPE)
 
+    if (CMAKE_SIZEOF_VOID_P EQUAL 4 AND CMAKE_C_COMPILER_ID STREQUAL "GNU")
+        set(_xxc_gnu_entry "_start")
+    else()
+        set(_xxc_gnu_entry "start")
+    endif()
+
     if (WIN32)
-        target_link_libraries(${target} PRIVATE kernel32 ws2_32)
+        target_link_libraries(${target} PRIVATE kernel32 ws2_32 bcrypt)
         if (MSVC OR CMAKE_C_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
             target_link_options(${target} PRIVATE
                 "LINKER:/NODEFAULTLIB:msvcrt"
@@ -78,7 +84,7 @@ function(xxc_freestanding_link_options target)
             if (NOT tgt_type STREQUAL "SHARED_LIBRARY")
                 if (MINGW OR CMAKE_C_COMPILER_ID STREQUAL "GNU")
                     target_link_options(${target} PRIVATE
-                        "LINKER:-e,start"
+                        "LINKER:-e,${_xxc_gnu_entry}"
                         "LINKER:--subsystem,console"
                     )
                 else()
@@ -98,6 +104,10 @@ function(xxc_freestanding_link_options target)
                 -fno-builtin
             )
 
+            if (CMAKE_C_COMPILER_ID STREQUAL "GNU")
+                target_link_options(${target} PRIVATE -fstack-protector-strong)
+            endif()
+
             set(_xxc_target_uses_shared FALSE)
             get_target_property(_xxc_target_link_libs ${target} LINK_LIBRARIES)
             if (_xxc_target_link_libs)
@@ -110,7 +120,11 @@ function(xxc_freestanding_link_options target)
             endif()
 
             if (NOT tgt_type STREQUAL "SHARED_LIBRARY" AND NOT _xxc_target_uses_shared)
-                target_link_options(${target} PRIVATE -static -no-pie)
+                if (XXC_STATIC_PIE)
+                    target_link_options(${target} PRIVATE -static-pie)
+                else()
+                    target_link_options(${target} PRIVATE -static -no-pie)
+                endif()
             endif()
         endif()
     endif()

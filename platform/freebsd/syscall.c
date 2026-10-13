@@ -45,6 +45,11 @@ long sys_openat(int dirfd, const char *path, int flags, int mode)
     return syscall(XXC_SYS_openat, (long)dirfd, (long)path, (long)flags, (long)mode);
 }
 
+long sys_getrandom(void *buf, size_t len, unsigned flags)
+{
+    return syscall(XXC_SYS_getrandom, (long)buf, (long)len, (long)flags);
+}
+
 long sys_getpid(void)
 {
     return syscall(XXC_SYS_getpid);

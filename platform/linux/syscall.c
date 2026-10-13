@@ -329,6 +329,16 @@ void sys_exit_thread(int status)
     /* GCOV_EXCL_STOP */
 }
 
+long sys_getrandom(void *buf, size_t len, unsigned flags)
+{
+#if defined(__NR_getrandom)
+    return syscall(__NR_getrandom, (long)buf, (long)len, (long)flags);
+#else
+    (void)buf; (void)len; (void)flags;
+    return -38; /* -ENOSYS */
+#endif
+}
+
 long sys_rt_sigprocmask(int how, const void *set, void *oldset, size_t sigsetsize)
 {
     return syscall(__NR_rt_sigprocmask, (long)how, (long)set, (long)oldset, (long)sigsetsize);

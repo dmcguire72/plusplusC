@@ -14,6 +14,7 @@ typedef void (*atexit_func_t)(void);
 extern int atexit(atexit_func_t func);
 
 extern void pluspluscBoot(int argc, char **argv);
+extern void __xxc_ssp_init(void);
 
 extern XXC_DYN_IMPORT HANDLE _xxc_w32_heap;
 
@@ -29,6 +30,7 @@ void freeArgs(void)
 
 XXC_NORETURN void start(void)
 {
+    __xxc_ssp_init();
     _xxc_w32_heap = GetProcessHeap();
     argv = GetArgvA(&argc);
     atexit(freeArgs);

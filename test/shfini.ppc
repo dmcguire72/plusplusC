@@ -1,0 +1,19 @@
+// ++C Runtime Library - shared-object destructor test (executable)
+// Copyright 2026 Daniel McGuire
+// Licensed under the MIT License
+#include <def.h>
+#include <parr.h>
+#include <xxc_sys.h>
+
+extern int shfini_b_touch(void);
+
+__attribute__((destructor)) static void exe_dtor(void)
+{
+    sys_write(1, "EXE\n", 4);
+}
+
+int program(parr_t csArgs)
+{
+    (void)csArgs;
+    return shfini_b_touch() == 1 ? 0 : 1;
+}

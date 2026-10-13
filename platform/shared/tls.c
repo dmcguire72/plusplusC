@@ -55,6 +55,38 @@ typedef struct { int r_version; xxc_link_map_t *r_map; } xxc_r_debug_t;
 #define XXC_TCB_SIZE 16
 #endif
 
+#define PT_LOAD    1
+#define DT_NULL    0
+#define DT_NEEDED  1
+#define DT_PLTRELSZ 2
+#define DT_STRTAB  5
+#define DT_RELA    7
+#define DT_RELASZ  8
+#define DT_FINI    13
+#define DT_SONAME  14
+#define DT_REL     17
+#define DT_RELSZ   18
+#define DT_JMPREL  23
+#define DT_INIT_ARRAY      25
+#define DT_FINI_ARRAY      26
+#define DT_INIT_ARRAYSZ    27
+#define DT_FINI_ARRAYSZ    28
+#define DT_PREINIT_ARRAY   32
+#define DT_PREINIT_ARRAYSZ 33
+#define DT_RELRSZ  35
+#define DT_RELR    36
+
+#if defined(__x86_64__)
+#define XXC_R_RELATIVE  8
+#define XXC_R_IRELATIVE 37
+#elif defined(__aarch64__)
+#define XXC_R_RELATIVE  1027
+#define XXC_R_IRELATIVE 1032
+#elif defined(__i386__)
+#define XXC_R_RELATIVE  8
+#define XXC_R_IRELATIVE 42
+#endif
+
 extern uintptr_t __stack_chk_guard;
 
 __thread struct xxc_thread *__xxc_self;
@@ -78,6 +110,16 @@ static u32 g_gs_entry;
 static inline uintptr_t align_up_u(uintptr_t v, uintptr_t a)   { return (v + a - 1) & ~(a - 1); }
 static inline uintptr_t align_down_u(uintptr_t v, uintptr_t a) { return v & ~(a - 1); }
 
+static XXC_NO_SSP uintptr_t phdr_bias(const xxc_phdr_t *ph, size_t phnum)
+{
+    for (size_t i = 0; i < phnum; i++)
+        if (ph[i].p_type == PT_PHDR) return (uintptr_t)ph - (uintptr_t)ph[i].p_vaddr;
+    for (size_t i = 0; i < phnum; i++)
+        if (ph[i].p_type == PT_LOAD && ph[i].p_offset == 0)
+            return ((uintptr_t)ph - sizeof(xxc_ehdr_t)) - (uintptr_t)ph[i].p_vaddr;
+    return 0;
+}
+
 static XXC_NO_SSP void tls_scan(int argc, char **argv)
 {
     char **envp = argv + argc + 1;
@@ -90,17 +132,10 @@ static XXC_NO_SSP void tls_scan(int argc, char **argv)
     {
         if (av[0] == AT_PHDR)  ph = (const xxc_phdr_t *)av[1];
         if (av[0] == AT_PHNUM) phnum = (size_t)av[1];
-        if (av[0] == AT_RANDOM && av[1] != 0)
-        {
-            uintptr_t r = *(const uintptr_t *)av[1];
-            if (r != 0) __stack_chk_guard = r & ~(uintptr_t)0xff;
-        }
     }
     if (ph == nullptr) return;
 
-    uintptr_t bias = 0;
-    for (size_t i = 0; i < phnum; i++)
-        if (ph[i].p_type == PT_PHDR) { bias = (uintptr_t)ph - (uintptr_t)ph[i].p_vaddr; break; }
+    uintptr_t bias = phdr_bias(ph, phnum);
 
     for (size_t i = 0; i < phnum; i++)
     {
@@ -239,9 +274,7 @@ static int tls_snapshot_dynamic(int argc, char **argv)
     }
     if (ph == nullptr) return 0;
 
-    uintptr_t bias = 0;
-    for (size_t i = 0; i < phnum; i++)
-        if (ph[i].p_type == PT_PHDR) { bias = (uintptr_t)ph - (uintptr_t)ph[i].p_vaddr; break; }
+    uintptr_t bias = phdr_bias(ph, phnum);
 
     xxc_r_debug_t *rd = nullptr;
     for (size_t i = 0; i < phnum && !rd; i++)
@@ -289,13 +322,6 @@ static int tls_snapshot_dynamic(int argc, char **argv)
     return 1;
 }
 
-#define DT_INIT_ARRAY      25
-#define DT_FINI_ARRAY      26
-#define DT_INIT_ARRAYSZ    27
-#define DT_FINI_ARRAYSZ    28
-#define DT_PREINIT_ARRAY   32
-#define DT_PREINIT_ARRAYSZ 33
-
 size_t __xxc_exe_dyn_array(int which, int argc, char **argv, void ***out)
 {
     /* GCOV_EXCL_START */
@@ -317,9 +343,7 @@ size_t __xxc_exe_dyn_array(int which, int argc, char **argv, void ***out)
     }
     if (ph == nullptr) return 0;
 
-    uintptr_t bias = 0;
-    for (size_t i = 0; i < phnum; i++)
-        if (ph[i].p_type == PT_PHDR) { bias = (uintptr_t)ph - (uintptr_t)ph[i].p_vaddr; break; }
+    uintptr_t bias = phdr_bias(ph, phnum);
 
     for (size_t i = 0; i < phnum; i++)
     {
@@ -350,9 +374,276 @@ size_t __xxc_exe_dyn_array(int which, int argc, char **argv, void ***out)
     /* GCOV_EXCL_STOP */
 }
 
+static XXC_NO_SSP const unsigned long *auxv_of(int argc, char **argv)
+{
+    char **envp = argv + argc + 1;
+    while (*envp) envp++;
+    return (const unsigned long *)(envp + 1);
+}
+
+static XXC_NO_SSP void ssp_seed(const unsigned long *av)
+{
+    uintptr_t r = 0;
+    for (; av[0] != AT_NULL; av += 2)
+        if (av[0] == AT_RANDOM && av[1] != 0)
+        {
+            r = *(const uintptr_t *)av[1];
+            break;
+        }
+    if (r == 0)
+    {
+        uintptr_t tmp = 0;
+        if (sys_getrandom(&tmp, sizeof(tmp), 1 /* GRND_NONBLOCK */) == (long)sizeof(tmp))
+            r = tmp;
+    }
+    if (r != 0)
+        __stack_chk_guard = r & ~(uintptr_t)0xff;
+}
+
+#if defined(XXC_R_RELATIVE)
+static XXC_NO_SSP void self_relocate(const unsigned long *av)
+{
+    const xxc_phdr_t *ph = nullptr;
+    size_t phnum = 0;
+    for (; av[0] != AT_NULL; av += 2)
+    {
+        if (av[0] == AT_PHDR)  ph = (const xxc_phdr_t *)av[1];
+        if (av[0] == AT_PHNUM) phnum = (size_t)av[1];
+        if (av[0] == AT_BASE && av[1] != 0) return;
+    }
+    if (ph == nullptr) return;
+
+    const xxc_phdr_t *dynph = nullptr;
+    for (size_t i = 0; i < phnum; i++)
+        if (ph[i].p_type == PT_DYNAMIC) dynph = &ph[i];
+    if (dynph == nullptr) return;
+    uintptr_t bias = phdr_bias(ph, phnum);
+
+    const xxc_dyn_t *d = (const xxc_dyn_t *)(bias + (uintptr_t)dynph->p_vaddr);
+    uintptr_t rela = 0, relasz = 0, rel = 0, relsz = 0, relr = 0, relrsz = 0, jmprel = 0, pltrelsz = 0;
+    for (; d->d_tag != DT_NULL; d++)
+    {
+        switch (d->d_tag)
+        {
+        case DT_RELA:      rela     = (uintptr_t)d->d_val; break;
+        case DT_RELASZ:    relasz   = (uintptr_t)d->d_val; break;
+        case DT_REL:       rel      = (uintptr_t)d->d_val; break;
+        case DT_RELSZ:     relsz    = (uintptr_t)d->d_val; break;
+        case DT_RELR:      relr     = (uintptr_t)d->d_val; break;
+        case DT_RELRSZ:    relrsz   = (uintptr_t)d->d_val; break;
+        case DT_JMPREL:    jmprel   = (uintptr_t)d->d_val; break;
+        case DT_PLTRELSZ:  pltrelsz = (uintptr_t)d->d_val; break;
+        }
+    }
+
+#if defined(__i386__)
+    for (int pass = 0; pass < 2; pass++)
+    {
+        uintptr_t tab = pass ? jmprel : rel, sz = pass ? pltrelsz : relsz;
+        if (!tab) continue;
+        const struct { uintptr_t off, info; } *r = (const void *)(bias + tab);
+        for (size_t n = sz / sizeof(*r); n; n--, r++)
+        {
+            uintptr_t *where = (uintptr_t *)(bias + r->off);
+            switch (r->info & 0xff)
+            {
+            case 0: break;
+            case XXC_R_RELATIVE:  *where += bias; break;
+            case XXC_R_IRELATIVE: *where = ((uintptr_t (*)(void))(bias + *where))(); break;
+            default: goto bad;
+            }
+        }
+    }
+#else
+    for (int pass = 0; pass < 2; pass++)
+    {
+        uintptr_t tab = pass ? jmprel : rela, sz = pass ? pltrelsz : relasz;
+        if (!tab) continue;
+        const struct { uintptr_t off, info; intptr_t addend; } *r = (const void *)(bias + tab);
+        for (size_t n = sz / sizeof(*r); n; n--, r++)
+        {
+            uintptr_t *where = (uintptr_t *)(bias + r->off);
+            switch ((u32)r->info)
+            {
+            case 0: break;
+            case XXC_R_RELATIVE:  *where = bias + (uintptr_t)r->addend; break;
+            case XXC_R_IRELATIVE: *where = ((uintptr_t (*)(void))(bias + (uintptr_t)r->addend))(); break;
+            default: goto bad;
+            }
+        }
+    }
+#endif
+
+    if (relr)
+    {
+        const uintptr_t *e = (const uintptr_t *)(bias + relr);
+        uintptr_t *where = nullptr;
+        for (size_t n = relrsz / sizeof(*e); n; n--, e++)
+        {
+            uintptr_t v = *e;
+            if (!(v & 1))
+            {
+                where = (uintptr_t *)(bias + v);
+                *where++ += bias;
+            }
+            else
+            {
+                for (size_t i = 0; (v >>= 1) != 0; i++)
+                    if (v & 1) where[i] += bias;
+                where += 8 * sizeof(uintptr_t) - 1;
+            }
+        }
+    }
+    return;
+bad:
+    {
+        static const char msg[] = "xxc: unsupported relocation in static-pie image\n";
+        sys_write(2, msg, sizeof(msg) - 1);
+        sys_exit(127);
+    }
+}
+#else
+static XXC_NO_SSP void self_relocate(const unsigned long *av) { (void)av; }
+#endif
+
+static int g_boot_argc;
+static char **g_boot_argv;
+
+typedef struct {
+    const xxc_link_map_t **maps;
+    int                   *order;
+    unsigned char         *state;
+    int                    n, cnt;
+} fini_ctx_t;
+
+static uintptr_t dyn_adj(uintptr_t v, uintptr_t base) { return v < base ? v + base : v; }
+
+static const char *dyn_strtab(const xxc_link_map_t *m)
+{
+    for (const xxc_dyn_t *d = m->l_ld; d && d->d_tag != DT_NULL; d++)
+        if (d->d_tag == DT_STRTAB) return (const char *)dyn_adj((uintptr_t)d->d_val, (uintptr_t)m->l_addr);
+    return nullptr;
+}
+
+static int str_eq(const char *a, const char *b)
+{
+    while (*a && *a == *b) { a++; b++; }
+    return *a == *b;
+}
+
+static const char *base_name(const char *p)
+{
+    const char *b = p;
+    for (; *p; p++) if (*p == '/') b = p + 1;
+    return b;
+}
+
+static int map_has_name(const xxc_link_map_t *m, const char *want)
+{
+    if (m->l_name && m->l_name[0] && str_eq(base_name(m->l_name), want)) return 1;
+    const char *st = dyn_strtab(m);
+    if (st)
+        for (const xxc_dyn_t *d = m->l_ld; d && d->d_tag != DT_NULL; d++)
+            if (d->d_tag == DT_SONAME && str_eq(st + d->d_val, want)) return 1;
+    return 0;
+}
+
+static void fini_visit(fini_ctx_t *c, int i)
+{
+    c->state[i] = 1;
+    const xxc_link_map_t *m = c->maps[i];
+    const char *st = dyn_strtab(m);
+    if (st)
+        for (const xxc_dyn_t *d = m->l_ld; d && d->d_tag != DT_NULL; d++)
+        {
+            if (d->d_tag != DT_NEEDED) continue;
+            const char *want = st + d->d_val;
+            for (int j = 0; j < c->n; j++)
+                if (!c->state[j] && map_has_name(c->maps[j], want)) { fini_visit(c, j); break; }
+        }
+    c->order[c->cnt++] = i;
+}
+
+static void run_map_fini(const xxc_link_map_t *m)
+{
+    uintptr_t base = (uintptr_t)m->l_addr, arr = 0, sz = 0, fn = 0;
+    for (const xxc_dyn_t *d = m->l_ld; d && d->d_tag != DT_NULL; d++)
+    {
+        if (d->d_tag == DT_FINI_ARRAY)   arr = dyn_adj((uintptr_t)d->d_val, base);
+        if (d->d_tag == DT_FINI_ARRAYSZ) sz  = (uintptr_t)d->d_val;
+        if (d->d_tag == DT_FINI)         fn  = dyn_adj((uintptr_t)d->d_val, base);
+    }
+    if (arr)
+        for (size_t k = sz / sizeof(void *); k > 0; k--)
+        {
+            void (*f)(void) = ((void (**)(void))arr)[k - 1];
+            if (f && f != (void (*)(void))(uintptr_t)-1) f();
+        }
+    if (fn) ((void (*)(void))fn)();
+}
+
+void __xxc_run_shared_fini(int include_main)
+{
+    if (!__xxc_dynamic_linked || g_boot_argv == nullptr) return;
+
+    const unsigned long *av = auxv_of(g_boot_argc, g_boot_argv);
+    const xxc_phdr_t *ph = nullptr;
+    size_t phnum = 0;
+    for (; av[0] != AT_NULL; av += 2)
+    {
+        if (av[0] == AT_PHDR)  ph = (const xxc_phdr_t *)av[1];
+        if (av[0] == AT_PHNUM) phnum = (size_t)av[1];
+    }
+    if (ph == nullptr) return;
+    uintptr_t bias = phdr_bias(ph, phnum);
+
+    xxc_r_debug_t *rd = nullptr;
+    for (size_t i = 0; i < phnum && !rd; i++)
+    {
+        if (ph[i].p_type != PT_DYNAMIC) continue;
+        for (const xxc_dyn_t *d = (const xxc_dyn_t *)(bias + (uintptr_t)ph[i].p_vaddr); d->d_tag != DT_NULL; d++)
+            if (d->d_tag == DT_DEBUG) { rd = (xxc_r_debug_t *)(uintptr_t)d->d_val; break; }
+    }
+    if (rd == nullptr || rd->r_map == nullptr) return;
+
+    int n = 0;
+    for (const xxc_link_map_t *m = rd->r_map; m; m = m->l_next) n++;
+
+    size_t bytes = (size_t)n * (sizeof(void *) + sizeof(int) + 1) + 64;
+    char *mem = (char *)sys_mmap(nullptr, align_up_u(bytes, 4096), PROT_READ | PROT_WRITE,
+                                 MAP_PRIVATE | MAP_ANON, -1, 0);
+    if (mem == nullptr) return;
+
+    fini_ctx_t c;
+    c.maps  = (const xxc_link_map_t **)mem;
+    c.order = (int *)(mem + (size_t)n * sizeof(void *));
+    c.state = (unsigned char *)(c.order + n);
+    c.n = n;
+    c.cnt = 0;
+    int i = 0;
+    for (const xxc_link_map_t *m = rd->r_map; m; m = m->l_next) c.maps[i++] = m;
+
+    fini_visit(&c, 0);
+    for (int j = 0; j < n; j++)
+        if (!c.state[j]) fini_visit(&c, j);
+
+    for (int k = c.cnt - 1; k >= 0; k--)
+    {
+        if (c.order[k] == 0 && !include_main) continue;
+        run_map_fini(c.maps[c.order[k]]);
+    }
+    sys_munmap(mem, align_up_u(bytes, 4096));
+}
+
 XXC_NO_SSP void __xxc_platform_init(int argc, char **argv)
 {
+    const unsigned long *auxv = auxv_of(argc, argv);
+    self_relocate(auxv);
+    ssp_seed(auxv);
+
     __xxc_environ = argv + argc + 1;
+    g_boot_argc = argc;
+    g_boot_argv = argv;
 
     if (has_interp(argc, argv))
     {

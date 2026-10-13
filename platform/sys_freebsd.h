@@ -46,6 +46,7 @@
 #define XXC_SYS_thr_kill        433
 #define XXC_SYS__umtx_op        454
 #define XXC_SYS_thr_new         455
+#define XXC_SYS_getrandom       563
 #define XXC_SYS_mmap            477
 #define XXC_SYS_lseek           478
 #define XXC_SYS_openat          499
@@ -139,6 +140,8 @@ void __xxc_platform_init(int argc, char **argv);
 extern char **__xxc_environ;
 extern int    __xxc_dynamic_linked;
 size_t __xxc_exe_dyn_array(int which, int argc, char **argv, void ***out);
+void   __xxc_run_shared_fini(int include_main);
+long   sys_getrandom(void *buf, size_t len, unsigned flags);
 
 typedef struct {
     u32 bits[4];

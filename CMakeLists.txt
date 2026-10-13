@@ -21,6 +21,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 option(XXC_BUILD_TEST "Build the ++C test executable" ${PROJECT_IS_TOP_LEVEL})
 option(XXC_BUILD_DEMO "Build the ++C demo executable" ${PROJECT_IS_TOP_LEVEL})
+option(XXC_STATIC_PIE "Link static executables as -static-pie (self-relocating) instead of -static -no-pie" ON)
 option(XXC_TESTS_USES_SHARED "Link the tests against the shared minicrt/xxc libraries when available" OFF)
 option(XXC_DEMO_USES_SHARED "Link the demo against the shared minicrt/xxc libraries when available" OFF)
 
@@ -85,6 +86,27 @@ if (XXC_BUILD_TEST)
     xxc_add_test(leak_test    test/leak.ppc)
     xxc_add_test(initfini_test test/initfini.ppc)
     xxc_add_test(stackframe_test test/stackframe.ppc)
+
+    if (XXC_TESTS_USES_SHARED AND (LINUX OR XXC_FREEBSD))
+        foreach(_n a b)
+            set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/test/shfini_${_n}.c" PROPERTIES LANGUAGE C)
+            add_library(shfini_${_n} SHARED "${CMAKE_CURRENT_SOURCE_DIR}/test/shfini_${_n}.c")
+            target_compile_definitions(shfini_${_n} PRIVATE XXC_USING_SHARED_LIB)
+            target_link_libraries(shfini_${_n} PRIVATE xxc::xxc_shared)
+            set_target_properties(shfini_${_n} PROPERTIES BUILD_RPATH "${CMAKE_BINARY_DIR}" INSTALL_RPATH "$ORIGIN")
+            xxc_freestanding_compile_options(shfini_${_n} PRIVATE)
+            xxc_freestanding_link_options(shfini_${_n})
+        endforeach()
+        target_link_libraries(shfini_b PUBLIC shfini_a)
+
+        xxc_add_test(shfini_test test/shfini.ppc)
+        target_link_libraries(xxc_shfini_test PRIVATE shfini_b)
+        add_custom_target(check_shfini
+            COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:xxc_shfini_test>
+                    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckShfini.cmake"
+            DEPENDS xxc_shfini_test USES_TERMINAL)
+        add_dependencies(check check_shfini)
+    endif()
 endif()
 
 if (XXC_BUILD_DEMO)

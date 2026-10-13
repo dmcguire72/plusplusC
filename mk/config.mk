@@ -47,13 +47,24 @@ endif
 STD ?= gnu2x
 OPT ?= -O3
 
-FREESTANDING = -ffreestanding -fno-builtin -fno-stack-protector -ftls-model=initial-exec
+STACK_PROTECTOR ?= 1
+ifeq ($(STACK_PROTECTOR),1)
+  SSP_FLAG = -fstack-protector-strong
+else
+  SSP_FLAG = -fno-stack-protector
+endif
+
+FREESTANDING = -ffreestanding -fno-builtin $(SSP_FLAG) -ftls-model=initial-exec
 ifeq ($(ARCH),aarch64)
   FREESTANDING += -mno-outline-atomics
 endif
 
 CFLAGS_BASE  = -std=$(STD) $(OPT) -fPIC $(FREESTANDING) -Wall -Wno-unused-function
 LDFLAGS_BASE = $(OPT) -nostdlib -fno-builtin
+
+ifeq ($(IS_CLANG),0)
+  LDFLAGS_BASE += $(SSP_FLAG)
+endif
 ifeq ($(LTO),1)
   ifeq ($(IS_CLANG),1)
     LTO_FLAG = -flto

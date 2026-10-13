@@ -7,6 +7,7 @@ if (NOT TARGET minicrt)
         ${CMAKE_CURRENT_SOURCE_DIR}/include/atexit.h
         ${CMAKE_CURRENT_SOURCE_DIR}/src/stackprot.c
         ${CMAKE_CURRENT_SOURCE_DIR}/src/chkstk.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/i64math.c
 
         ${CMAKE_CURRENT_SOURCE_DIR}/src/str.c
         ${CMAKE_CURRENT_SOURCE_DIR}/include/str.h
@@ -117,7 +118,7 @@ if (NOT TARGET minicrt)
             endif()
         endif()
     elseif (WIN32)
-        target_link_libraries(minicrt PUBLIC sys_win32 kernel32 ws2_32)
+        target_link_libraries(minicrt PUBLIC sys_win32 kernel32 ws2_32 bcrypt)
         if (TARGET minicrt_shared)
             target_link_libraries(minicrt_shared PUBLIC sys_win32_dll)
         endif()

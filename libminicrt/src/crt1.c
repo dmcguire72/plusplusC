@@ -108,6 +108,13 @@ static void run_fini(void)
             continue;
         ((xxc_fini_fn)f)();
     }
+
+    if (__xxc_dynamic_linked)
+#if defined(__FreeBSD__)
+        __xxc_run_shared_fini(1);
+#else
+        __xxc_run_shared_fini(0);
+#endif
 }
 
 XXC_NORETURN XXC_NO_SSP void pluspluscBoot(int argc, char **argv)

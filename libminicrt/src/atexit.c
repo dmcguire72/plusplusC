@@ -94,6 +94,9 @@ XXC_NORETURN void exit(int status)
         hook();
     }
 
+#if defined(_WIN32)
+    ExitProcess((UINT)status);
+#endif
     _exit(status);
     __NORETURN__
     /* GCOV_EXCL_STOP */

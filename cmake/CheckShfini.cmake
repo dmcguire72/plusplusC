@@ -1,0 +1,7 @@
+execute_process(COMMAND "${EXE}" OUTPUT_VARIABLE out RESULT_VARIABLE rc)
+string(STRIP "${out}" out)
+string(REPLACE "\n" ";" lines "${out}")
+if (NOT rc EQUAL 0 OR NOT out STREQUAL "EXE\nB\nA")
+    message(FATAL_ERROR "shfini_test FAILED (rc=${rc}), output:\n${out}")
+endif()
+message(STATUS "shfini_test: destructor order OK")
