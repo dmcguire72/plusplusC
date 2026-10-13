@@ -6,7 +6,7 @@
 #include <def.h>
 #include <mem.h>
 
-#ifdef __UEFI_
+#ifdef __UEFI__
 
 #include <sys_uefi.h>
 

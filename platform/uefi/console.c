@@ -8,7 +8,7 @@
 void __uefi_write(const char *s, size_t n, unsigned int stream)
 {
     EFI_SIMPLE_TEXT_OUTPUT *out = stream ? __uefi_st->StdErr : __uefi_st->ConOut;
-    if (out == nullptr || n == nullptr) return;
+    if (out == nullptr || n == 0) return;
 
     CHAR16 buf[130];
     size_t j = 0;
