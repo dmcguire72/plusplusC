@@ -5,6 +5,7 @@
 #include <thread.h>
 #include <atomic.h>
 #include <alloc.h>
+#include <mem.h>
 #include <atexit.h>
 #include <crt_lock.h>
 

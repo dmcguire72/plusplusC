@@ -9,6 +9,16 @@
 
 #if defined(XXC_RAWSYS)
 #include <xxc_sys.h>
+
+#if defined(__linux__)
+#define SOCK_SO_RCVTIMEO 20
+#define SOCK_SO_SNDTIMEO 21
+
+struct timeval {
+    long tv_sec;
+    long tv_usec;
+};
+#endif
 #endif
 
 #define SOCK_TLS_SLOTS 64
