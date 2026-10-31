@@ -420,15 +420,20 @@ static XXC_NO_SSP void self_relocate(const unsigned long *av)
     uintptr_t bias = phdr_bias(ph, phnum);
 
     const xxc_dyn_t *d = (const xxc_dyn_t *)(bias + (uintptr_t)dynph->p_vaddr);
-    uintptr_t rela = 0, relasz = 0, rel = 0, relsz = 0, relr = 0, relrsz = 0, jmprel = 0, pltrelsz = 0;
+    uintptr_t rela = 0, relasz = 0, relr = 0, relrsz = 0, jmprel = 0, pltrelsz = 0;
+#if defined(__i386__)
+    uintptr_t rel = 0, relsz = 0;
+#endif
     for (; d->d_tag != DT_NULL; d++)
     {
         switch (d->d_tag)
         {
         case DT_RELA:      rela     = (uintptr_t)d->d_val; break;
         case DT_RELASZ:    relasz   = (uintptr_t)d->d_val; break;
+#if defined(__i386__)
         case DT_REL:       rel      = (uintptr_t)d->d_val; break;
         case DT_RELSZ:     relsz    = (uintptr_t)d->d_val; break;
+#endif
         case DT_RELR:      relr     = (uintptr_t)d->d_val; break;
         case DT_RELRSZ:    relrsz   = (uintptr_t)d->d_val; break;
         case DT_JMPREL:    jmprel   = (uintptr_t)d->d_val; break;
