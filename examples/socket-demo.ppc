@@ -20,7 +20,6 @@ CLASS(SocketDemo, Application)
 
 CLASS_EXPORT(SocketDemo);
 
-static volatile atomic_bool_t g_interrupted = ATOMIC_INIT(false);
 static volatile atomic_u8_t g_interrupt_count = ATOMIC_INIT(0);
 
 static atomic_bool_t g_server_ready = ATOMIC_INIT(false);
@@ -28,11 +27,8 @@ static atomic_bool_t g_server_ready = ATOMIC_INIT(false);
 static void handle_sigint(int sig)
 {
     (void)sig;
-    u8 iInterrupt = atomic_u8_fetch_add(&g_interrupt_count, 1) + 1;
-    bool bInterrupt = atomic_bool_load(&g_interrupted);
-    if (iInterrupt == 1)
-            while (!atomic_bool_cas(&g_interrupted, &bInterrupt, !bInterrupt)) {}
-    else if (iInterrupt >= 2)
+
+    if (atomic_u8_fetch_add(&g_interrupt_count, 1) >= 1)
         _exit(130);
 }
 
@@ -56,41 +52,17 @@ static void *client_thread_func(void *arg)
 
 int program(parr_t csArgs)
 {
-    (void)csArgs;
     atomic_u8_init(&g_interrupt_count, 0);
-    atomic_bool_init(&g_interrupted, false);
     if (signal(SIGINT, handle_sigint) == SIG_ERR)
         return 1;
 
-#if defined(__GNUC__) || defined(__clang__)
-    SCOPED_NEW(SocketDemo, demo);
-#else
     SocketDemo *demo = NEW(SocketDemo);
-#endif
-    if (demo == nullptr)
-        return 1;
+    Application *base = AS(Application, demo);
 
-    Application *app = AS(Application, demo);
+    CALL1(base, parse_args, &csArgs);
+    int exit_code = CALL0(base, main);
 
-    CALL1(app, parse_args, &csArgs);
-
-    int exit_code = 0;
-
-    bool bInterrupt = atomic_bool_load(&g_interrupted);
-    if (bInterrupt)
-        exit_code = 130;
-    else
-        exit_code = CALL0(app, main);
-
-#if !defined(__GNUC__) && !defined(__clang__)
     REMOVE(demo);
-#endif
-
-    bInterrupt = atomic_bool_load(&g_interrupted);
-    
-    if (bInterrupt && exit_code == 0)
-        exit_code = 130;
-
     return exit_code;
 }
 
