@@ -66,7 +66,10 @@ if (XXC_BUILD_TEST)
         endif()
 
         if (CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
-            target_compile_options(xxc_${name} PRIVATE -Wno-literal-range)
+            target_compile_options(xxc_${name} PRIVATE
+                -Wno-literal-range
+                -Wno-format
+            )
         endif()
 
         target_link_libraries(xxc_${name} PRIVATE ${XXC_TEST_LIB})

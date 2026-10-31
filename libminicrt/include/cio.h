@@ -26,12 +26,12 @@ void print_parr_c_string(const parr_t *csArr, unsigned int stream);
 
 void print_parr_dstr(const parr_t *dsArr, unsigned int stream);
 
-int vsnprintf(char *buf, size_t size, const char *fmt, va_list args);
+int vsnprintf(char *buf, size_t size, const char *fmt, va_list args) XXC_PRINTF_VALIDATE(3, 0);
 
-int snprintf(char *buf, size_t size, const char *fmt, ...);
+int snprintf(char *buf, size_t size, const char *fmt, ...) XXC_PRINTF_VALIDATE(3, 4);
 
-int vprintf(const char *fmt, va_list args, unsigned int stream);
+int vprintf(const char *fmt, va_list args, unsigned int stream) XXC_PRINTF_VALIDATE(1, 0);
 
-int printf(const char *fmt, ...);
+int printf(const char *fmt, ...) XXC_PRINTF_VALIDATE(1, 2);
 
 #endif

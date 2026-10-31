@@ -59,7 +59,7 @@ ifeq ($(ARCH),aarch64)
   FREESTANDING += -mno-outline-atomics
 endif
 
-CFLAGS_BASE  = -std=$(STD) $(OPT) -fPIC $(FREESTANDING) -Wall -Wno-unused-function
+CFLAGS_BASE  = -std=$(STD) $(OPT) -fPIC $(FREESTANDING) -Wall -Wno-unused-function -Wno-format
 LDFLAGS_BASE = $(OPT) -nostdlib -fno-builtin
 
 ifeq ($(IS_CLANG),0)

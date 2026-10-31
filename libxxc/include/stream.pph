@@ -44,7 +44,7 @@ METHOD_PROTO(Stream, void, close, (void *self));
 
 METHOD_PROTO(Stream, i64, fprint, (void *self, const char *str));
 METHOD_PROTO(Stream, i64, fprintln, (void *self, const char *str));
-METHOD_PROTO(Stream, int, fvprintf, (void *self, const char *fmt, va_list args));
-METHOD_PROTO(Stream, int, fprintf, (void *self, const char *fmt, ...));
+METHOD_PROTO(Stream, int, fvprintf, (void *self, const char *fmt, va_list args)) XXC_PRINTF_VALIDATE(2, 0);
+METHOD_PROTO(Stream, int, fprintf, (void *self, const char *fmt, ...)) XXC_PRINTF_VALIDATE(2, 3);
 
 #endif /* Stream_H */

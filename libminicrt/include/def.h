@@ -19,6 +19,7 @@
     #define XXC_UNUSED       __attribute__((unused))
     #define XXC_LABEL_UNUSED __attribute__((unused))
     #define XXC_USED         __attribute__((used))
+    #define XXC_PRINTF_VALIDATE(fmt, args) __attribute__((format(printf, fmt, args)))
 #elif defined(_MSC_VER)
     #define XXC_LIKELY(x)   (x)
     #define XXC_UNLIKELY(x) (x)
@@ -26,6 +27,7 @@
     #define XXC_NORETURN     __declspec(noreturn)
     #define XXC_UNUSED
     #define XXC_USED
+    #define XXC_PRINT_VALIDATE(fmt, args)
 #else
     #define XXC_LIKELY(x)   (x)
     #define XXC_UNLIKELY(x) (x)
@@ -34,6 +36,7 @@
     #define XXC_UNUSED
     #define XXC_LABEL_UNUSED
     #define XXC_USED
+    #define XXC_PRINT_VALIDATE(fmt, args)
 #endif
 
 #if defined(__has_attribute)
