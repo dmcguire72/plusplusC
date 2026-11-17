@@ -151,8 +151,8 @@ static bool test_env_many_variables(void)
 
 static bool run_exit_env_process(Process *p, int expected)
 {
-    bool ok = CALL1(p, add_arg, T_SH_FLAG) && CALL1(p, add_arg, T_EXIT_ENV) &&
-              CALL0(p, start) && CALL0(p, wait) && CALL0(p, get_exit_code) == expected;
+    bool ok = CALL(p, add_arg, T_SH_FLAG) && CALL(p, add_arg, T_EXIT_ENV) &&
+              CALL(p, start) && CALL(p, wait) && CALL(p, get_exit_code) == expected;
     return ok;
 }
 
@@ -174,52 +174,52 @@ static bool test_environment_basic(void)
     Environment *e = environment_new();
     ASSERT(e != nullptr);
 
-    ASSERT(CALL0(e, size) == 0 && !CALL1(e, has, "A"));
-    ASSERT_STR_EQ(CALL2(e, get_or, "A", "fallback"), "fallback");
-    ASSERT(CALL1(e, get, "A").data == nullptr);
-    ASSERT(CALL1(e, entry_at, 0) == nullptr);
+    ASSERT(CALL(e, size) == 0 && !CALL(e, has, "A"));
+    ASSERT_STR_EQ(CALL(e, get_or, "A", "fallback"), "fallback");
+    ASSERT(CALL(e, get, "A").data == nullptr);
+    ASSERT(CALL(e, entry_at, 0) == nullptr);
 
-    ASSERT(CALL2(e, set, "A", "1"));
-    ASSERT(CALL2(e, set, "B", "2"));
-    ASSERT(CALL0(e, size) == 2 && CALL1(e, has, "A") && CALL1(e, has, "B"));
-    ASSERT_STR_EQ(CALL2(e, get_or, "A", "fallback"), "1");
+    ASSERT(CALL(e, set, "A", "1"));
+    ASSERT(CALL(e, set, "B", "2"));
+    ASSERT(CALL(e, size) == 2 && CALL(e, has, "A") && CALL(e, has, "B"));
+    ASSERT_STR_EQ(CALL(e, get_or, "A", "fallback"), "1");
 
-    dstr_t v = CALL1(e, get, "B");
+    dstr_t v = CALL(e, get, "B");
     ASSERT(v.data != nullptr && strcmp(v.data, "2") == 0);
     dstr_free(&v);
 
-    ASSERT_STR_EQ(CALL1(e, entry_at, 0), "A=1");
-    ASSERT_STR_EQ(CALL1(e, entry_at, 1), "B=2");
-    ASSERT(CALL1(e, entry_at, 2) == nullptr);
+    ASSERT_STR_EQ(CALL(e, entry_at, 0), "A=1");
+    ASSERT_STR_EQ(CALL(e, entry_at, 1), "B=2");
+    ASSERT(CALL(e, entry_at, 2) == nullptr);
 
-    ASSERT(CALL2(e, set, "A", "9"));
-    ASSERT(CALL0(e, size) == 2);
-    ASSERT_STR_EQ(CALL1(e, entry_at, 0), "A=9");
+    ASSERT(CALL(e, set, "A", "9"));
+    ASSERT(CALL(e, size) == 2);
+    ASSERT_STR_EQ(CALL(e, entry_at, 0), "A=9");
 
-    ASSERT(CALL1(e, unset, "A"));
-    ASSERT(!CALL1(e, unset, "A"));
-    ASSERT(CALL0(e, size) == 1 && !CALL1(e, has, "A"));
-    ASSERT_STR_EQ(CALL1(e, entry_at, 0), "B=2");
+    ASSERT(CALL(e, unset, "A"));
+    ASSERT(!CALL(e, unset, "A"));
+    ASSERT(CALL(e, size) == 1 && !CALL(e, has, "A"));
+    ASSERT_STR_EQ(CALL(e, entry_at, 0), "B=2");
 
-    ASSERT(!CALL2(e, set, "", "x"));
-    ASSERT(!CALL2(e, set, nullptr, "x"));
-    ASSERT(!CALL2(e, set, "A=B", "x"));
-    ASSERT(!CALL2(e, set, "N", nullptr));
-    ASSERT(!CALL1(e, has, ""));
-    ASSERT(CALL1(e, get, "A=B").data == nullptr);
-    ASSERT_STR_EQ(CALL2(e, get_or, "", "fb"), "fb");
-    ASSERT(!CALL1(e, unset, ""));
-    ASSERT(CALL0(e, size) == 1);
+    ASSERT(!CALL(e, set, "", "x"));
+    ASSERT(!CALL(e, set, nullptr, "x"));
+    ASSERT(!CALL(e, set, "A=B", "x"));
+    ASSERT(!CALL(e, set, "N", nullptr));
+    ASSERT(!CALL(e, has, ""));
+    ASSERT(CALL(e, get, "A=B").data == nullptr);
+    ASSERT_STR_EQ(CALL(e, get_or, "", "fb"), "fb");
+    ASSERT(!CALL(e, unset, ""));
+    ASSERT(CALL(e, size) == 1);
 
-    char **envp = CALL0(e, to_envp);
+    char **envp = CALL(e, to_envp);
     ASSERT(envp != nullptr);
     ASSERT_STR_EQ(envp[0], "B=2");
     ASSERT(envp[1] == nullptr);
     free(envp);
 
-    CALL0(e, clear);
-    ASSERT(CALL0(e, size) == 0);
-    envp = CALL0(e, to_envp);
+    CALL(e, clear);
+    ASSERT(CALL(e, size) == 0);
+    envp = CALL(e, to_envp);
     ASSERT(envp != nullptr && envp[0] == nullptr);
     free(envp);
 
@@ -227,20 +227,20 @@ static bool test_environment_basic(void)
     {
         dstr_t name = dstr_new("K");
         dstr_append_int(&name, i);
-        ASSERT(CALL2(e, set, name.data, "v"));
+        ASSERT(CALL(e, set, name.data, "v"));
         dstr_free(&name);
     }
-    ASSERT(CALL0(e, size) == 40 && CALL1(e, has, "K39"));
+    ASSERT(CALL(e, size) == 40 && CALL(e, has, "K39"));
 
 #if defined(_WIN32)
-    ASSERT(CALL1(e, has, "k5"));
-    ASSERT(CALL2(e, set, "k5", "w"));
-    ASSERT(CALL0(e, size) == 40);
-    ASSERT_STR_EQ(CALL2(e, get_or, "K5", ""), "w");
+    ASSERT(CALL(e, has, "k5"));
+    ASSERT(CALL(e, set, "k5", "w"));
+    ASSERT(CALL(e, size) == 40);
+    ASSERT_STR_EQ(CALL(e, get_or, "K5", ""), "w");
 #else
-    ASSERT(!CALL1(e, has, "k5"));
-    ASSERT(CALL2(e, set, "k5", "w"));
-    ASSERT(CALL0(e, size) == 41);
+    ASSERT(!CALL(e, has, "k5"));
+    ASSERT(CALL(e, set, "k5", "w"));
+    ASSERT(CALL(e, size) == 41);
 #endif
 
     REMOVE(e);
@@ -253,25 +253,25 @@ static bool test_environment_current_and_copy(void)
 
     Environment *snap = environment_current();
     ASSERT(snap != nullptr);
-    ASSERT(CALL1(snap, has, ENV_VAR));
-    ASSERT_STR_EQ(CALL2(snap, get_or, ENV_VAR, ""), "snap");
+    ASSERT(CALL(snap, has, ENV_VAR));
+    ASSERT_STR_EQ(CALL(snap, get_or, ENV_VAR, ""), "snap");
 
     parr_t list = env_list();
-    ASSERT(CALL0(snap, size) == list.len);
+    ASSERT(CALL(snap, size) == list.len);
     parr_free_c_strings(&list);
     parr_free(&list);
 
-    ASSERT(CALL2(snap, set, ENV_VAR, "changed"));
+    ASSERT(CALL(snap, set, ENV_VAR, "changed"));
     ASSERT(env_is(ENV_VAR, "snap"));
-    ASSERT(CALL1(snap, unset, ENV_VAR));
+    ASSERT(CALL(snap, unset, ENV_VAR));
     ASSERT(env_is(ENV_VAR, "snap"));
 
-    ASSERT(CALL2(snap, set, ENV_VAR, "orig"));
+    ASSERT(CALL(snap, set, ENV_VAR, "orig"));
     Environment *copy = environment_copy(snap);
-    ASSERT(copy != nullptr && CALL0(copy, size) == CALL0(snap, size));
-    ASSERT(CALL2(copy, set, ENV_VAR, "other"));
-    ASSERT_STR_EQ(CALL2(snap, get_or, ENV_VAR, ""), "orig");
-    ASSERT_STR_EQ(CALL2(copy, get_or, ENV_VAR, ""), "other");
+    ASSERT(copy != nullptr && CALL(copy, size) == CALL(snap, size));
+    ASSERT(CALL(copy, set, ENV_VAR, "other"));
+    ASSERT_STR_EQ(CALL(snap, get_or, ENV_VAR, ""), "orig");
+    ASSERT_STR_EQ(CALL(copy, get_or, ENV_VAR, ""), "other");
     ASSERT(environment_copy(nullptr) == nullptr);
 
     env_unset(ENV_VAR);
@@ -289,16 +289,16 @@ static bool test_environment_apply(void)
     Environment *e     = environment_current();
     ASSERT(saved != nullptr && e != nullptr);
 
-    ASSERT(CALL2(e, set, ENV_VAR, "after"));
-    ASSERT(CALL2(e, set, "XXC_TEST_ENV_NEW", "n"));
-    ASSERT(CALL1(e, unset, ENV_GONE));
+    ASSERT(CALL(e, set, ENV_VAR, "after"));
+    ASSERT(CALL(e, set, "XXC_TEST_ENV_NEW", "n"));
+    ASSERT(CALL(e, unset, ENV_GONE));
 
-    ASSERT(CALL0(e, apply));
+    ASSERT(CALL(e, apply));
     ASSERT(env_is(ENV_VAR, "after"));
     ASSERT(env_is("XXC_TEST_ENV_NEW", "n"));
     ASSERT(env_is(ENV_GONE, nullptr));
 
-    ASSERT(CALL0(saved, apply));
+    ASSERT(CALL(saved, apply));
     ASSERT(env_is(ENV_VAR, "before"));
     ASSERT(env_is("XXC_TEST_ENV_NEW", nullptr));
     ASSERT(env_is(ENV_GONE, "g"));
@@ -317,42 +317,42 @@ static bool test_process_environment(void)
     Process *a = process_new(T_SH);
     ASSERT(run_exit_env_process(a, 3));
 
-    ASSERT(!CALL2(a, set_env, ENV_CODE, "1"));
-    ASSERT(!CALL1(a, unset_env, ENV_CODE));
-    ASSERT(!CALL0(a, clear_env));
-    ASSERT(!CALL1(a, set_environment, nullptr));
+    ASSERT(!CALL(a, set_env, ENV_CODE, "1"));
+    ASSERT(!CALL(a, unset_env, ENV_CODE));
+    ASSERT(!CALL(a, clear_env));
+    ASSERT(!CALL(a, set_environment, nullptr));
     REMOVE(a);
 
     Process *b = process_new(T_SH);
-    ASSERT(CALL2(b, set_env, ENV_CODE, "9"));
-    ASSERT(!CALL2(b, set_env, "", "x"));
-    ASSERT(!CALL2(b, set_env, ENV_CODE, nullptr));
+    ASSERT(CALL(b, set_env, ENV_CODE, "9"));
+    ASSERT(!CALL(b, set_env, "", "x"));
+    ASSERT(!CALL(b, set_env, ENV_CODE, nullptr));
     ASSERT(run_exit_env_process(b, 9));
     ASSERT(env_is(ENV_CODE, "3"));
     REMOVE(b);
 
     Process *c = process_new(T_SH);
-    ASSERT(CALL0(c, clear_env));
-    ASSERT(CALL2(c, set_env, ENV_CODE, "6"));
+    ASSERT(CALL(c, clear_env));
+    ASSERT(CALL(c, set_env, ENV_CODE, "6"));
     ASSERT(run_exit_env_process(c, 6));
     REMOVE(c);
 
     Process *d = process_new(T_SH);
-    ASSERT(CALL1(d, unset_env, ENV_CODE));
-    ASSERT(!CALL1(d->env, has, ENV_CODE));
+    ASSERT(CALL(d, unset_env, ENV_CODE));
+    ASSERT(!CALL(d->env, has, ENV_CODE));
     REMOVE(d);
 
     Environment *e = environment_new();
-    ASSERT(CALL2(e, set, ENV_CODE, "4"));
+    ASSERT(CALL(e, set, ENV_CODE, "4"));
     Process *f = process_new(T_SH);
-    ASSERT(CALL1(f, set_environment, e));
-    ASSERT(CALL2(e, set, ENV_CODE, "5"));
+    ASSERT(CALL(f, set_environment, e));
+    ASSERT(CALL(e, set, ENV_CODE, "5"));
     ASSERT(run_exit_env_process(f, 4));
     REMOVE(f);
 
     Process *g = process_new(T_SH);
-    ASSERT(CALL1(g, set_environment, e));
-    ASSERT(CALL1(g, set_environment, nullptr));
+    ASSERT(CALL(g, set_environment, e));
+    ASSERT(CALL(g, set_environment, nullptr));
     ASSERT(g->env == nullptr);
     ASSERT(run_exit_env_process(g, 3));
     REMOVE(g);
@@ -400,21 +400,21 @@ static bool test_process_runnable_environment(void)
 
     EnvJob  *job = NEW(EnvJob);
     Process *p   = process_new_runnable((Runnable *)job);
-    ASSERT(CALL2(p, set_env, ENV_CODE, "8"));
-    ASSERT(CALL0(p, start) && CALL0(p, wait));
-    ASSERT(CALL0(p, get_exit_code) == 8);
+    ASSERT(CALL(p, set_env, ENV_CODE, "8"));
+    ASSERT(CALL(p, start) && CALL(p, wait));
+    ASSERT(CALL(p, get_exit_code) == 8);
     ASSERT(env_is(ENV_CODE, "3"));
     REMOVE(p);
 
     Process *q = process_new_runnable((Runnable *)job);
-    ASSERT(CALL0(q, clear_env));
-    ASSERT(CALL0(q, start) && CALL0(q, wait));
-    ASSERT(CALL0(q, get_exit_code) == 99);
+    ASSERT(CALL(q, clear_env));
+    ASSERT(CALL(q, start) && CALL(q, wait));
+    ASSERT(CALL(q, get_exit_code) == 99);
     REMOVE(q);
 
     Process *r = process_new_runnable((Runnable *)job);
-    ASSERT(CALL0(r, start) && CALL0(r, wait));
-    ASSERT(CALL0(r, get_exit_code) == 3);
+    ASSERT(CALL(r, start) && CALL(r, wait));
+    ASSERT(CALL(r, get_exit_code) == 3);
     REMOVE(r);
 
     REMOVE(job);

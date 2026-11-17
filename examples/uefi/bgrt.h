@@ -55,7 +55,7 @@ static inline void draw_bgrt_logo(Display *disp)
         }
     }
 
-    if (rsdp == nullptr || rsdp->XsdtAddress == nullptr) return;
+    if (rsdp == nullptr || rsdp->XsdtAddress == 0) return;
 
     ACPI_HEADER *xsdt = (ACPI_HEADER *)rsdp->XsdtAddress;
     int entries = (xsdt->Length - sizeof(ACPI_HEADER)) / sizeof(UINT64);

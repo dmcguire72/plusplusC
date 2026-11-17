@@ -97,18 +97,18 @@ static bool test_stream_base_class(void)
     ASSERT(s != nullptr);
 
     char buf[4];
-    ASSERT(CALL2(s, read, buf, 4) == -1);
-    ASSERT(CALL2(s, write, "x", 1) == -1);
-    ASSERT(CALL2(s, seek, 0, FS_SEEK_SET) == -1);
-    ASSERT(CALL0(s, tell) == -1);
-    ASSERT(CALL0(s, eof) == 1);
-    CALL0(s, close);
+    ASSERT(CALL(s, read, buf, 4) == -1);
+    ASSERT(CALL(s, write, "x", 1) == -1);
+    ASSERT(CALL(s, seek, 0, FS_SEEK_SET) == -1);
+    ASSERT(CALL(s, tell) == -1);
+    ASSERT(CALL(s, eof) == 1);
+    CALL(s, close);
 
-    ASSERT(CALL1(s, fprint, "abc") == -1);
-    ASSERT(CALL1(s, fprint, nullptr) == 0);
-    ASSERT(CALL1(s, fprintln, "abc") == -1);
-    ASSERT(CALL1(s, fprintln, nullptr) == -1);
-    ASSERT(CALL2(s, fprintf, "%d", 12345) == 5);
+    ASSERT(CALL(s, fprint, "abc") == -1);
+    ASSERT(CALL(s, fprint, nullptr) == 0);
+    ASSERT(CALL(s, fprintln, "abc") == -1);
+    ASSERT(CALL(s, fprintln, nullptr) == -1);
+    ASSERT(CALL(s, fprintf, "%d", 12345) == 5);
     REMOVE(s);
     return true;
 }
@@ -119,11 +119,11 @@ static bool test_stream_print_helpers(void)
     Stream *s = AS(Stream, ms);
     ASSERT(s != nullptr);
 
-    ASSERT(CALL1(s, fprint, "ab") == 2);
-    ASSERT(CALL1(s, fprint, nullptr) == 0);
-    ASSERT(CALL1(s, fprintln, "cd") == 3);
-    ASSERT(CALL1(s, fprintln, nullptr) == 1);
-    ASSERT(CALL2(s, fprintf, "<%d>", 7) == 3);
+    ASSERT(CALL(s, fprint, "ab") == 2);
+    ASSERT(CALL(s, fprint, nullptr) == 0);
+    ASSERT(CALL(s, fprintln, "cd") == 3);
+    ASSERT(CALL(s, fprintln, nullptr) == 1);
+    ASSERT(CALL(s, fprintf, "<%d>", 7) == 3);
     ASSERT(stream_vprintf(s, "[%s]", "v") == 3);
 
     ASSERT(ms->size == 12);
@@ -135,9 +135,9 @@ static bool test_stream_print_helpers(void)
         big[i] = (char)('a' + (i % 26));
     big[2999] = '\0';
 
-    CALL0(s, close);
-    ASSERT(CALL1(s, fprintln, big) == 3000);
-    ASSERT(CALL2(s, fprintf, "%s", big) == 2999);
+    CALL(s, close);
+    ASSERT(CALL(s, fprintln, big) == 3000);
+    ASSERT(CALL(s, fprintf, "%s", big) == 2999);
     ASSERT(stream_vprintf(s, "%s", big) == 2999);
     ASSERT(ms->size == 3000 + 2999 + 2999);
     ASSERT(ms->buffer[2999] == '\n');
@@ -154,59 +154,59 @@ static bool test_memstream_edge_cases(void)
 
     ASSERT(mstream_get_buffer(nullptr) == nullptr);
     ASSERT(mstream_get_buffer(ms) == nullptr);
-    ASSERT(CALL0(s, eof) == 1);
-    ASSERT(CALL2(s, read, buf, 8) == 0);
-    ASSERT(CALL2(s, read, nullptr, 8) == 0);
-    ASSERT(CALL2(s, write, nullptr, 8) == 0);
-    ASSERT(CALL2(s, write, "x", 0) == 0);
+    ASSERT(CALL(s, eof) == 1);
+    ASSERT(CALL(s, read, buf, 8) == 0);
+    ASSERT(CALL(s, read, nullptr, 8) == 0);
+    ASSERT(CALL(s, write, nullptr, 8) == 0);
+    ASSERT(CALL(s, write, "x", 0) == 0);
 
-    ASSERT(CALL2(s, write, "0123456789", 10) == 10);
-    ASSERT(CALL0(s, tell) == 10);
-    ASSERT(CALL0(s, eof) == 1);
+    ASSERT(CALL(s, write, "0123456789", 10) == 10);
+    ASSERT(CALL(s, tell) == 10);
+    ASSERT(CALL(s, eof) == 1);
 
-    ASSERT(CALL2(s, seek, 2, FS_SEEK_SET) == 2);
-    ASSERT(CALL2(s, seek, 3, FS_SEEK_CUR) == 5);
-    ASSERT(CALL2(s, seek, -4, FS_SEEK_END) == 6);
-    ASSERT(CALL2(s, seek, -1, FS_SEEK_SET) == -1);
-    ASSERT(CALL2(s, seek, -100, FS_SEEK_CUR) == -1);
-    ASSERT(CALL2(s, seek, 0, 99) == -1);
-    ASSERT(CALL0(s, tell) == 6);
+    ASSERT(CALL(s, seek, 2, FS_SEEK_SET) == 2);
+    ASSERT(CALL(s, seek, 3, FS_SEEK_CUR) == 5);
+    ASSERT(CALL(s, seek, -4, FS_SEEK_END) == 6);
+    ASSERT(CALL(s, seek, -1, FS_SEEK_SET) == -1);
+    ASSERT(CALL(s, seek, -100, FS_SEEK_CUR) == -1);
+    ASSERT(CALL(s, seek, 0, 99) == -1);
+    ASSERT(CALL(s, tell) == 6);
 
-    ASSERT(CALL2(s, read, buf, 100) == 4);
+    ASSERT(CALL(s, read, buf, 100) == 4);
     ASSERT(memcmp(buf, "6789", 4) == 0);
-    ASSERT(CALL2(s, read, buf, 1) == 0);
+    ASSERT(CALL(s, read, buf, 1) == 0);
 
-    CALL2(s, seek, 1, FS_SEEK_SET);
-    ASSERT(CALL2(s, write, "AB", 2) == 2);
+    CALL(s, seek, 1, FS_SEEK_SET);
+    ASSERT(CALL(s, write, "AB", 2) == 2);
     ASSERT(ms->size == 10);
-    CALL2(s, seek, 0, FS_SEEK_END);
+    CALL(s, seek, 0, FS_SEEK_END);
     char chunk[200];
     memset(chunk, 'z', sizeof(chunk));
-    ASSERT(CALL2(s, write, chunk, sizeof(chunk)) == 200);
+    ASSERT(CALL(s, write, chunk, sizeof(chunk)) == 200);
     ASSERT(ms->size == 210 && ms->capacity >= 210);
     ASSERT(memcmp(ms->buffer, "0AB3456789", 10) == 0);
 
-    CALL2(s, seek, 5000, FS_SEEK_SET);
-    ASSERT(CALL2(s, write, "!", 1) == 1);
+    CALL(s, seek, 5000, FS_SEEK_SET);
+    ASSERT(CALL(s, write, "!", 1) == 1);
     ASSERT(ms->size == 5001 && ms->capacity >= 5001);
 
-    CALL0(s, close);
+    CALL(s, close);
     ASSERT(ms->buffer == nullptr && ms->size == 0 && ms->capacity == 0);
-    CALL0(s, close);
-    ASSERT(CALL0(s, tell) == 0);
+    CALL(s, close);
+    ASSERT(CALL(s, tell) == 0);
     REMOVE(ms);
 
     ms = NEW(MemoryStream);
     s = AS(Stream, ms);
-    ASSERT(CALL2(s, write, "ab", 2) == 2);
-    ASSERT(CALL2(s, write, "x", (size_t)-1) == -1);
-    ASSERT(CALL2(s, write, "x", ((size_t)1 << 63) + 5) == -1);
+    ASSERT(CALL(s, write, "ab", 2) == 2);
+    ASSERT(CALL(s, write, "x", (size_t)-1) == -1);
+    ASSERT(CALL(s, write, "x", ((size_t)1 << 63) + 5) == -1);
     ASSERT(ms->size == 2);
     REMOVE(ms);
 
     ms = NEW(MemoryStream);
     s = AS(Stream, ms);
-    ASSERT(CALL2(s, write, "x", (size_t)1 << 46) == -1);
+    ASSERT(CALL(s, write, "x", (size_t)1 << 46) == -1);
     ASSERT(ms->size == 0);
     REMOVE(ms);
     return true;
@@ -219,13 +219,13 @@ static bool test_memstream_gap_reads_as_zero(void)
 
     char dirty[64];
     memset(dirty, 'D', sizeof(dirty));
-    ASSERT(CALL2(s, write, dirty, sizeof(dirty)) == 64);
-    CALL2(s, seek, 4, FS_SEEK_SET);
-    CALL0(s, close);
+    ASSERT(CALL(s, write, dirty, sizeof(dirty)) == 64);
+    CALL(s, seek, 4, FS_SEEK_SET);
+    CALL(s, close);
 
-    ASSERT(CALL2(s, write, "ab", 2) == 2);
-    ASSERT(CALL2(s, seek, 10, FS_SEEK_SET) == 10);
-    ASSERT(CALL2(s, write, "c", 1) == 1);
+    ASSERT(CALL(s, write, "ab", 2) == 2);
+    ASSERT(CALL(s, seek, 10, FS_SEEK_SET) == 10);
+    ASSERT(CALL(s, write, "c", 1) == 1);
     ASSERT(ms->size == 11);
     ASSERT(memcmp(ms->buffer, "ab\0\0\0\0\0\0\0\0c", 11) == 0);
     REMOVE(ms);
@@ -236,8 +236,8 @@ static bool test_freadline_memstream(void)
 {
     MemoryStream *ms = NEW(MemoryStream);
     Stream *s = AS(Stream, ms);
-    ASSERT(CALL1(s, fprint, "one\r\ntwo\n\nlast") == 14);
-    CALL2(s, seek, 0, FS_SEEK_SET);
+    ASSERT(CALL(s, fprint, "one\r\ntwo\n\nlast") == 14);
+    CALL(s, seek, 0, FS_SEEK_SET);
 
     dstr_t line;
     ASSERT(freadline(s, &line) == 5);
@@ -285,32 +285,32 @@ static bool test_filestream_modes(void)
     Stream *w = fopen_str(TMP_A, "w");
     ASSERT(w != nullptr);
     ASSERT(fwrite(w, "hello\n") == 6);
-    ASSERT(CALL1(w, fprintln, "world") == 6);
-    ASSERT(CALL3(w, fprintf, "%d-%s\n", 7, "x") == 4);
-    ASSERT(CALL2(w, read, buf, 4) < 0);
-    ASSERT(CALL0(w, tell) == 16);
+    ASSERT(CALL(w, fprintln, "world") == 6);
+    ASSERT(CALL(w, fprintf, "%d-%s\n", 7, "x") == 4);
+    ASSERT(CALL(w, read, buf, 4) < 0);
+    ASSERT(CALL(w, tell) == 16);
     REMOVE(w);
 
     Stream *r = fopen_str(TMP_A, "r");
     ASSERT(r != nullptr);
-    ASSERT(CALL0(r, eof) == 0);
-    ASSERT(CALL2(r, write, "x", 1) < 0);
-    ASSERT(CALL2(r, read, buf, 6) == 6);
+    ASSERT(CALL(r, eof) == 0);
+    ASSERT(CALL(r, write, "x", 1) < 0);
+    ASSERT(CALL(r, read, buf, 6) == 6);
     ASSERT(memcmp(buf, "hello\n", 6) == 0);
-    ASSERT(CALL0(r, tell) == 6);
-    ASSERT(CALL2(r, read, buf, 63) == 10);
-    ASSERT(CALL0(r, eof) == 0);
-    ASSERT(CALL2(r, read, buf, 63) == 0);
-    ASSERT(CALL0(r, eof) == 1);
-    ASSERT(CALL2(r, seek, 0, FS_SEEK_SET) == 0);
-    ASSERT(CALL0(r, eof) == 0);
-    ASSERT(CALL2(r, seek, 2, FS_SEEK_CUR) == 2);
-    ASSERT(CALL2(r, seek, -3, FS_SEEK_END) == 13);
-    ASSERT(CALL2(r, seek, 0, 99) < 0);
-    CALL0(r, close);
-    ASSERT(CALL2(r, read, buf, 1) < 0);
-    ASSERT(CALL0(r, tell) < 0);
-    CALL0(r, close);
+    ASSERT(CALL(r, tell) == 6);
+    ASSERT(CALL(r, read, buf, 63) == 10);
+    ASSERT(CALL(r, eof) == 0);
+    ASSERT(CALL(r, read, buf, 63) == 0);
+    ASSERT(CALL(r, eof) == 1);
+    ASSERT(CALL(r, seek, 0, FS_SEEK_SET) == 0);
+    ASSERT(CALL(r, eof) == 0);
+    ASSERT(CALL(r, seek, 2, FS_SEEK_CUR) == 2);
+    ASSERT(CALL(r, seek, -3, FS_SEEK_END) == 13);
+    ASSERT(CALL(r, seek, 0, 99) < 0);
+    CALL(r, close);
+    ASSERT(CALL(r, read, buf, 1) < 0);
+    ASSERT(CALL(r, tell) < 0);
+    CALL(r, close);
     REMOVE(r);
 
     Stream *a = fopen_str(TMP_A, "a");
@@ -319,25 +319,25 @@ static bool test_filestream_modes(void)
     REMOVE(a);
     Stream *ap = fopen_str(TMP_A, "a+");
     ASSERT(ap != nullptr);
-    ASSERT(CALL2(ap, seek, 0, FS_SEEK_SET) == 0);
-    ASSERT(CALL2(ap, read, buf, 63) == 20);
+    ASSERT(CALL(ap, seek, 0, FS_SEEK_SET) == 0);
+    ASSERT(CALL(ap, read, buf, 63) == 20);
     ASSERT(memcmp(buf + 16, "tail", 4) == 0);
     REMOVE(ap);
 
     Stream *rp = fopen_str(TMP_A, "r+");
     ASSERT(rp != nullptr);
     ASSERT(fwrite(rp, "HE") == 2);
-    ASSERT(CALL2(rp, seek, 0, FS_SEEK_SET) == 0);
-    ASSERT(CALL2(rp, read, buf, 5) == 5);
+    ASSERT(CALL(rp, seek, 0, FS_SEEK_SET) == 0);
+    ASSERT(CALL(rp, read, buf, 5) == 5);
     ASSERT(memcmp(buf, "HEllo", 5) == 0);
     REMOVE(rp);
 
     Stream *wp = fopen_str(TMP_A, "w+");
     ASSERT(wp != nullptr);
-    ASSERT(CALL2(wp, read, buf, 4) == 0);
+    ASSERT(CALL(wp, read, buf, 4) == 0);
     ASSERT(fwrite(wp, "abc") == 3);
-    ASSERT(CALL2(wp, seek, 0, FS_SEEK_SET) == 0);
-    ASSERT(CALL2(wp, read, buf, 8) == 3);
+    ASSERT(CALL(wp, seek, 0, FS_SEEK_SET) == 0);
+    ASSERT(CALL(wp, read, buf, 8) == 3);
     REMOVE(wp);
 
     tmp_cleanup();
@@ -368,7 +368,7 @@ static bool test_filestream_open_errors(void)
     ASSERT(s != nullptr);
     ASSERT(fwrite(s, "ok") == 2);
     REMOVE(s);
-    ASSERT(CALL0(p, remove));
+    ASSERT(CALL(p, remove));
     REMOVE(p);
     return true;
 }
@@ -377,11 +377,11 @@ static bool test_filestream_unowned_and_invalid(void)
 {
     Stream *out = cout();
     ASSERT(out != nullptr && cerr() != nullptr && cin() != nullptr);
-    CALL0(out, close);
+    CALL(out, close);
     capture_t cap;
     char text[32];
     ASSERT(capture_begin(&cap, 1));
-    ASSERT(CALL1(out, fprint, "still open") == 10);
+    ASSERT(CALL(out, fprint, "still open") == 10);
     capture_end(&cap, text, sizeof(text));
     ASSERT_STR_EQ(text, "still open");
 
@@ -389,12 +389,12 @@ static bool test_filestream_unowned_and_invalid(void)
     ASSERT(fs != nullptr && fs->fd == -1);
     Stream *s = AS(Stream, fs);
     char b[4];
-    ASSERT(CALL2(s, read, b, 4) < 0);
-    ASSERT(CALL2(s, write, "x", 1) < 0);
-    ASSERT(CALL2(s, seek, 0, FS_SEEK_SET) < 0);
-    ASSERT(CALL0(s, tell) < 0);
-    ASSERT(CALL0(s, eof) == 0);
-    CALL0(s, close);
+    ASSERT(CALL(s, read, b, 4) < 0);
+    ASSERT(CALL(s, write, "x", 1) < 0);
+    ASSERT(CALL(s, seek, 0, FS_SEEK_SET) < 0);
+    ASSERT(CALL(s, tell) < 0);
+    ASSERT(CALL(s, eof) == 0);
+    CALL(s, close);
     REMOVE(fs);
     return true;
 }
@@ -433,7 +433,7 @@ static bool test_cin_reads_stdin(void)
 
 static dstr_t path_str(FSPath *p)
 {
-    return CALL0(p, data);
+    return CALL(p, data);
 }
 
 static bool test_fspath_components(void)
@@ -454,17 +454,17 @@ static bool test_fspath_components(void)
     ASSERT_STR_EQ(s.data, expected);
     dstr_free(&s);
 
-    CALL1(p, join, "d/e");
-    CALL1(p, join, nullptr);
-    CALL1(p, join, "");
+    CALL(p, join, "d/e");
+    CALL(p, join, nullptr);
+    CALL(p, join, "");
     s = path_str(p);
     snprintf(expected, sizeof(expected), "a%sb%sc%sd%se", sep, sep, sep, sep);
     ASSERT_STR_EQ(s.data, expected);
     dstr_free(&s);
 
-    FSPath *parent = CALL0(p, parent);
-    FSPath *base = CALL0(p, base);
-    FSPath *rel = CALL0(p, relative);
+    FSPath *parent = CALL(p, parent);
+    FSPath *base = CALL(p, base);
+    FSPath *rel = CALL(p, relative);
     dstr_t ps = path_str(parent), bs = path_str(base), rs = path_str(rel);
     snprintf(expected, sizeof(expected), "a%sb%sc%sd", sep, sep, sep);
     ASSERT_STR_EQ(ps.data, expected);
@@ -477,7 +477,7 @@ static bool test_fspath_components(void)
     dstr_t empty = dstr_new("");
     FSPath *e = fs_path(empty);
     dstr_free(&empty);
-    FSPath *ep = CALL0(e, parent), *eb = CALL0(e, base), *er = CALL0(e, relative);
+    FSPath *ep = CALL(e, parent), *eb = CALL(e, base), *er = CALL(e, relative);
     dstr_t d1 = path_str(ep), d2 = path_str(eb), d3 = path_str(er);
     ASSERT(d1.len == 0 && d2.len == 0 && d3.len == 0);
     dstr_free(&d1); dstr_free(&d2); dstr_free(&d3);
@@ -504,7 +504,7 @@ static bool test_fspath_components(void)
 #if defined(__linux__) || defined(__FreeBSD__)
 static bool path_is(FSPath *p, const char *expected)
 {
-    dstr_t s = CALL0(p, data);
+    dstr_t s = CALL(p, data);
     bool same = s.data && strcmp(s.data, expected) == 0;
     if (!same)
         printf("  path is '%s', expected '%s'\n", s.data ? s.data : "(null)", expected);
@@ -520,25 +520,25 @@ static bool test_fspath_absolute(void)
     ASSERT(p->absolute);
     ASSERT(path_is(p, "/tmp/x/y"));
 
-    FSPath *parent = CALL0(p, parent);
-    FSPath *base = CALL0(p, base);
-    FSPath *rel = CALL0(p, relative);
+    FSPath *parent = CALL(p, parent);
+    FSPath *base = CALL(p, base);
+    FSPath *rel = CALL(p, relative);
     ASSERT(path_is(parent, "/tmp/x"));
     ASSERT(path_is(base, "y") && !base->absolute);
     ASSERT(path_is(rel, "tmp/x/y") && !rel->absolute);
     REMOVE(base); REMOVE(rel);
 
-    FSPath *up = CALL0(parent, parent);
-    FSPath *root = CALL0(up, parent);
-    FSPath *still_root = CALL0(root, parent);
+    FSPath *up = CALL(parent, parent);
+    FSPath *root = CALL(up, parent);
+    FSPath *still_root = CALL(root, parent);
     ASSERT(path_is(up, "/tmp"));
     ASSERT(path_is(root, "/"));
     ASSERT(path_is(still_root, "/"));
-    FSPath *root_base = CALL0(root, base);
+    FSPath *root_base = CALL(root, base);
     ASSERT(path_is(root_base, ""));
     REMOVE(parent); REMOVE(up); REMOVE(root); REMOVE(still_root); REMOVE(root_base);
 
-    CALL1(p, join, "z");
+    CALL(p, join, "z");
     ASSERT(path_is(p, "/tmp/x/y/z"));
     REMOVE(p);
 
@@ -557,7 +557,7 @@ static bool test_fspath_absolute(void)
     dstr_t rel_in = dstr_new("a");
     FSPath *a = fs_path(rel_in);
     dstr_free(&rel_in);
-    CALL1(a, join, "/b");
+    CALL(a, join, "/b");
     ASSERT(!a->absolute && path_is(a, "a/b"));
     REMOVE(a);
     return true;
@@ -625,26 +625,26 @@ static bool test_fspath_dot_normalization(void)
 
     FSPath *a = fspath_of("a/./b/../c");
     ASSERT(!a->absolute && path_is(a, "a/c"));
-    CALL1(a, join, "./d/./e");
+    CALL(a, join, "./d/./e");
     ASSERT(path_is(a, "a/c/d/e"));
-    CALL1(a, join, "../../f");
+    CALL(a, join, "../../f");
     ASSERT(path_is(a, "a/c/f"));
-    CALL1(a, join, "..\\g\\.\\h");
+    CALL(a, join, "..\\g\\.\\h");
     ASSERT(path_is(a, "a/c/g/h"));
     REMOVE(a);
 
     FSPath *r = fspath_of("a/b");
-    CALL1(r, join, "../../x");
+    CALL(r, join, "../../x");
     ASSERT(!r->absolute && path_is(r, "x"));
     REMOVE(r);
 
     FSPath *p = fspath_of("/tmp/./x//../y/");
     ASSERT(p->absolute && path_is(p, "/tmp/y"));
-    CALL1(p, join, "../../../../z");
+    CALL(p, join, "../../../../z");
     ASSERT(p->absolute && path_is(p, "/z"));
-    CALL1(p, join, "..");
+    CALL(p, join, "..");
     ASSERT(path_is(p, "/"));
-    CALL1(p, join, ".");
+    CALL(p, join, ".");
     ASSERT(path_is(p, "/"));
     REMOVE(p);
 
@@ -653,7 +653,7 @@ static bool test_fspath_dot_normalization(void)
     REMOVE(h);
 
     FSPath *tf = fspath_of("/a/b/c");
-    CALL1(tf, join, "../");
+    CALL(tf, join, "../");
     ASSERT(path_is(tf, "/a/b"));
     REMOVE(tf);
 
@@ -662,7 +662,7 @@ static bool test_fspath_dot_normalization(void)
     REMOVE(dot);
 
     FSPath *dot2 = fspath_of("");
-    CALL1(dot2, join, "./sub/file.txt");
+    CALL(dot2, join, "./sub/file.txt");
     dstr_t want = cwd_plus(cwd, "sub/file.txt");
     ASSERT(dot2->absolute && path_is(dot2, want.data));
     dstr_free(&want);
@@ -674,14 +674,14 @@ static bool test_fspath_dot_normalization(void)
     REMOVE(up);
 
     FSPath *up2 = fspath_of("");
-    CALL1(up2, join, "../sibling");
+    CALL(up2, join, "../sibling");
     want = cwd_plus(par.data, "sibling");
     ASSERT(path_is(up2, want.data));
     dstr_free(&want);
     REMOVE(up2);
 
     FSPath *esc = fspath_of("a");
-    CALL1(esc, join, "../..");
+    CALL(esc, join, "../..");
     ASSERT(esc->absolute && path_is(esc, par.data));
     REMOVE(esc);
 
@@ -703,20 +703,20 @@ static bool test_fspath_touch_remove(void)
     FSPath *p = fs_path(name);
     dstr_free(&name);
 
-    ASSERT(!CALL0(p, remove));
-    ASSERT(CALL0(p, touch));
-    ASSERT(CALL0(p, touch));
+    ASSERT(!CALL(p, remove));
+    ASSERT(CALL(p, touch));
+    ASSERT(CALL(p, touch));
     Stream *s = fopen(p, "r");
     ASSERT(s != nullptr);
     REMOVE(s);
-    ASSERT(CALL0(p, remove));
-    ASSERT(!CALL0(p, remove));
+    ASSERT(CALL(p, remove));
+    ASSERT(!CALL(p, remove));
     REMOVE(p);
 
     dstr_t bad = dstr_new("no_such_dir_xxc/f.tmp");
     FSPath *bp = fs_path(bad);
     dstr_free(&bad);
-    ASSERT(!CALL0(bp, touch));
+    ASSERT(!CALL(bp, touch));
     REMOVE(bp);
     return true;
 }
@@ -727,20 +727,20 @@ static bool test_map_byte_keys(void)
     Map *m = NEW(Map);
     const char k1[] = {'a', '\0', 'b'};
     const char k2[] = {'a', '\0', 'c'};
-    ASSERT(CALL3(m, set_bytes, k1, 3, (void *)1));
-    ASSERT(CALL3(m, set_bytes, k2, 3, (void *)2));
-    ASSERT(CALL2(m, get_bytes, k1, 3) == (void *)1);
+    ASSERT(CALL(m, set_bytes, k1, 3, (void *)1));
+    ASSERT(CALL(m, set_bytes, k2, 3, (void *)2));
+    ASSERT(CALL(m, get_bytes, k1, 3) == (void *)1);
 
     void *out = nullptr;
-    ASSERT(CALL3(m, try_get_bytes, k2, 3, &out));
+    ASSERT(CALL(m, try_get_bytes, k2, 3, &out));
     ASSERT(out == (void *)2);
     out = (void *)0x77;
-    ASSERT(!CALL3(m, try_get_bytes, "zz", 2, &out));
-    ASSERT(CALL2(m, contains_bytes, k1, 3));
-    ASSERT(!CALL2(m, contains_bytes, k1, 2));
-    ASSERT(CALL2(m, remove_bytes, k1, 3));
-    ASSERT(!CALL2(m, remove_bytes, k1, 3));
-    ASSERT(CALL0(m, len) == 1);
+    ASSERT(!CALL(m, try_get_bytes, "zz", 2, &out));
+    ASSERT(CALL(m, contains_bytes, k1, 3));
+    ASSERT(!CALL(m, contains_bytes, k1, 2));
+    ASSERT(CALL(m, remove_bytes, k1, 3));
+    ASSERT(!CALL(m, remove_bytes, k1, 3));
+    ASSERT(CALL(m, len) == 1);
     REMOVE(m);
     return true;
 }
@@ -763,16 +763,16 @@ static bool test_runnable_and_thread_guards(void)
 {
     Runnable *r = NEW(Runnable);
     ASSERT(r != nullptr);
-    ASSERT(CALL0(r, run) == nullptr);
+    ASSERT(CALL(r, run) == nullptr);
     REMOVE(r);
 
     Thread *none = NEW(Thread);
-    ASSERT(!CALL0(none, start));
-    ASSERT(!CALL0(none, start_detached));
-    ASSERT(!CALL0(none, is_joinable));
-    ASSERT(!CALL0(none, detach));
-    ASSERT(CALL0(none, join) == nullptr);
-    ASSERT(CALL0(none, get_id) == 0);
+    ASSERT(!CALL(none, start));
+    ASSERT(!CALL(none, start_detached));
+    ASSERT(!CALL(none, is_joinable));
+    ASSERT(!CALL(none, detach));
+    ASSERT(CALL(none, join) == nullptr);
+    ASSERT(CALL(none, get_id) == 0);
     REMOVE(none);
 
     ASSERT(thread_new_fn(nullptr, nullptr) == nullptr);
@@ -780,15 +780,15 @@ static bool test_runnable_and_thread_guards(void)
     Job *job = NEW(Job);
     Thread *t = thread_new((Runnable *)job);
     ASSERT(t != nullptr);
-    ASSERT(CALL0(t, start));
-    ASSERT(!CALL0(t, start));
-    ASSERT(!CALL0(t, start_detached));
-    ASSERT(CALL0(t, is_joinable));
-    ASSERT(CALL0(t, get_id) != 0);
-    ASSERT(CALL0(t, join) == (void *)9);
-    ASSERT(!CALL0(t, is_joinable));
-    ASSERT(CALL0(t, join) == nullptr);
-    ASSERT(!CALL0(t, detach));
+    ASSERT(CALL(t, start));
+    ASSERT(!CALL(t, start));
+    ASSERT(!CALL(t, start_detached));
+    ASSERT(CALL(t, is_joinable));
+    ASSERT(CALL(t, get_id) != 0);
+    ASSERT(CALL(t, join) == (void *)9);
+    ASSERT(!CALL(t, is_joinable));
+    ASSERT(CALL(t, join) == nullptr);
+    ASSERT(!CALL(t, detach));
     ASSERT(job->runs == 1);
     REMOVE(t);
     REMOVE(job);
@@ -797,14 +797,14 @@ static bool test_runnable_and_thread_guards(void)
     ASSERT(d != nullptr && IS_A(d->target, Runnable));
 
     Thread *dd = thread_new_fn(return_arg, (void *)1);
-    ASSERT(CALL0(dd, start));
+    ASSERT(CALL(dd, start));
     ASSERT(thread_detach(dd->handle) == THREAD_SUCCESS);
-    ASSERT(!CALL0(dd, detach));
+    ASSERT(!CALL(dd, detach));
     REMOVE(dd);
 
-    ASSERT(CALL0(d, start));
-    ASSERT(CALL0(d, detach));
-    ASSERT(!CALL0(d, is_joinable));
+    ASSERT(CALL(d, start));
+    ASSERT(CALL(d, detach));
+    ASSERT(!CALL(d, is_joinable));
     REMOVE(d);
     thread_sleep_ms(20);
     return true;
@@ -825,14 +825,14 @@ static parr_t make_argv(const char *first, ...)
 static bool test_argparser(void)
 {
     ArgParser *ap = NEW(ArgParser);
-    CALL2(ap, add_flag, "verbose", "Be chatty");
-    CALL2(ap, add_value_flag, "name", "Your name");
-    CALL2(ap, add_value_flag, "out", "Output file");
+    CALL(ap, add_flag, "verbose", "Be chatty");
+    CALL(ap, add_value_flag, "name", "Your name");
+    CALL(ap, add_value_flag, "out", "Output file");
 
-    ASSERT(!CALL1(ap, get_bool, "verbose"));
-    ASSERT(!CALL1(ap, get_bool, "missing"));
-    ASSERT_STR_EQ(CALL2(ap, get_string, "name", "dflt"), "dflt");
-    CALL1(ap, parse, nullptr);
+    ASSERT(!CALL(ap, get_bool, "verbose"));
+    ASSERT(!CALL(ap, get_bool, "missing"));
+    ASSERT_STR_EQ(CALL(ap, get_string, "name", "dflt"), "dflt");
+    CALL(ap, parse, nullptr);
 
     parr_t argv = make_argv("prog", "-v", "plain", "--verbose", "--name", "Bob", "--out", nullptr);
     parr_append_val(&argv, nullptr);
@@ -842,21 +842,21 @@ static bool test_argparser(void)
     char out[128];
     capture_t cap;
     ASSERT(capture_begin(&cap, 1));
-    CALL1(ap, parse, &argv);
+    CALL(ap, parse, &argv);
     capture_end(&cap, out, sizeof(out));
     ASSERT_STR_EQ(out, "Unknown option: --bogus\n");
 
-    ASSERT(CALL1(ap, get_bool, "verbose"));
-    ASSERT(CALL1(ap, get_bool, "name"));
-    ASSERT(!CALL1(ap, get_bool, "bogus"));
-    ASSERT_STR_EQ(CALL2(ap, get_string, "name", "dflt"), "Bob");
-    ASSERT_STR_EQ(CALL2(ap, get_string, "out", "dflt"), "");
-    ASSERT_STR_EQ(CALL2(ap, get_string, "verbose", "dflt"), "dflt");
-    ASSERT_STR_EQ(CALL2(ap, get_string, "nothere", "dflt"), "dflt");
+    ASSERT(CALL(ap, get_bool, "verbose"));
+    ASSERT(CALL(ap, get_bool, "name"));
+    ASSERT(!CALL(ap, get_bool, "bogus"));
+    ASSERT_STR_EQ(CALL(ap, get_string, "name", "dflt"), "Bob");
+    ASSERT_STR_EQ(CALL(ap, get_string, "out", "dflt"), "");
+    ASSERT_STR_EQ(CALL(ap, get_string, "verbose", "dflt"), "dflt");
+    ASSERT_STR_EQ(CALL(ap, get_string, "nothere", "dflt"), "dflt");
 
     parr_append_val(&ap->flags, nullptr);
     ASSERT(capture_begin(&cap, 1));
-    CALL0(ap, print_flags);
+    CALL(ap, print_flags);
     capture_end(&cap, out, sizeof(out));
     ASSERT_STR_EQ(out,
         "  --verbose       Be chatty\n"
@@ -897,8 +897,8 @@ IMPLEMENT(TestApp, int, run, (void *self))
 IMPLEMENT(TestApp, void, configure_args, (void *self))
 {
     TestApp *t = (TestApp *)self;
-    CALL2(t->base.args, add_flag, "verbose", "Be chatty");
-    CALL2(t->base.args, add_value_flag, "name", "Your name");
+    CALL(t->base.args, add_flag, "verbose", "Be chatty");
+    CALL(t->base.args, add_value_flag, "name", "Your name");
 }
 
 #if defined(__linux__) || defined(__FreeBSD__)
@@ -908,21 +908,21 @@ static bool test_application(void)
     capture_t cap;
 
     Application *plain = NEW(Application);
-    CALL1(plain, parse_args, nullptr);
+    CALL(plain, parse_args, nullptr);
     ASSERT_STR_EQ(plain->program.data, "app");
     ASSERT(!plain->show_help);
-    ASSERT(CALL0(plain, main) == 0);
+    ASSERT(CALL(plain, main) == 0);
     REMOVE(plain);
 
     TestApp *app = NEW(TestApp);
     Application *base = AS(Application, app);
     parr_t argv = make_argv("/usr/local/bin/tool", "--verbose", "--name", "Bob", nullptr);
-    CALL1(base, parse_args, &argv);
+    CALL(base, parse_args, &argv);
     ASSERT_STR_EQ(base->program.data, "tool");
     ASSERT(!base->show_help);
-    ASSERT(CALL1(base->args, get_bool, "verbose"));
-    ASSERT_STR_EQ(CALL2(base->args, get_string, "name", ""), "Bob");
-    ASSERT(CALL0(base, main) == 5);
+    ASSERT(CALL(base->args, get_bool, "verbose"));
+    ASSERT_STR_EQ(CALL(base->args, get_string, "name", ""), "Bob");
+    ASSERT(CALL(base, main) == 5);
     ASSERT(app->ran == 1);
     parr_free_c_strings(&argv);
     REMOVE(app);
@@ -930,10 +930,10 @@ static bool test_application(void)
     app = NEW(TestApp);
     base = AS(Application, app);
     argv = make_argv("tool", "--help", nullptr);
-    CALL1(base, parse_args, &argv);
+    CALL(base, parse_args, &argv);
     ASSERT(base->show_help);
     ASSERT(capture_begin(&cap, 1));
-    int rc = CALL0(base, main);
+    int rc = CALL(base, main);
     capture_end(&cap, out, sizeof(out));
     ASSERT(rc == 0 && app->ran == 0);
     ASSERT_STR_EQ(out,
@@ -947,13 +947,13 @@ static bool test_application(void)
 
     plain = NEW(Application);
     parr_t empty = parr_new(nullptr, 0);
-    CALL1(plain, parse_args, &empty);
+    CALL(plain, parse_args, &empty);
     ASSERT_STR_EQ(plain->program.data, "app");
     parr_free(&empty);
 
     Application *fresh = NEW(Application);
     ASSERT(capture_begin(&cap, 1));
-    CALL0(fresh, print_help);
+    CALL(fresh, print_help);
     capture_end(&cap, out, sizeof(out));
     ASSERT_STR_EQ(out, "Usage: app [OPTIONS...]\nOPTIONS:\n");
     REMOVE(fresh);
@@ -979,20 +979,20 @@ static int child_xxc_out_of_memory(void *arg)
 
     unsigned long lim[2] = {1, 1};
     syscall(__NR_setrlimit, 9L, (long)lim);
-    if (CALL0(with_target, start))          return 20;
-    if (CALL0(with_target, start_detached)) return 21;
+    if (CALL(with_target, start))          return 20;
+    if (CALL(with_target, start_detached)) return 21;
 
     void *held = oom_begin();
     if (NEW(Counter) != nullptr)                     return 30;
-    if (CALL0(with_target, start_detached))       return 31;
+    if (CALL(with_target, start_detached))       return 31;
     if (thread_new_fn(return_arg, nullptr) != nullptr)  return 32;
-    if (CALL2(AS(Stream, ms), write, "0123456789", 10) != -1) return 33;
-    CALL2(ap, add_flag, "late", "never stored");
+    if (CALL(AS(Stream, ms), write, "0123456789", 10) != -1) return 33;
+    CALL(ap, add_flag, "late", "never stored");
     if (fopen_str(TMP_A, "r") != nullptr)            return 34;
     {
         static char big[2048];
         memset(big, 'x', sizeof(big) - 1);
-        if (CALL1(AS(Stream, ms), fprintln, big) != -1) return 35;
+        if (CALL(AS(Stream, ms), fprintln, big) != -1) return 35;
     }
 
     if (!oom_free_one(&held, fr_usable))          return 40;

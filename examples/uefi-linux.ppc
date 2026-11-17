@@ -19,16 +19,16 @@ static bool read_all(const char *path, u8 **out, size_t *size)
     SCOPED Stream *f = fopen_str(path, "r");
     if (f == nullptr) return false;
 
-    CALL2(f, seek, 0, FS_SEEK_END);
-    i64 n = CALL0(f, tell);
-    CALL2(f, seek, 0, FS_SEEK_SET);
+    CALL(f, seek, 0, FS_SEEK_END);
+    i64 n = CALL(f, tell);
+    CALL(f, seek, 0, FS_SEEK_SET);
     if (n <= 0) return false;
 
     u8 *buf = malloc((size_t)n + 1);
     size_t got = 0;
     while (buf && got < (size_t)n)
     {
-        i64 r = CALL2(f, read, buf + got, (size_t)n - got);
+        i64 r = CALL(f, read, buf + got, (size_t)n - got);
         if (r <= 0) break;
         got += (size_t)r;
     }
@@ -93,7 +93,7 @@ static void parse_boot_ini(const char *p, boot_cfg_t *cfg)
 
 static void cmd_join(dstr_t *cmd, const char *part)
 {
-    if (part == nullptr || part[0] == nullptr) return;
+    if (part == nullptr || part[0] == '\0') return;
     if (cmd->len > 0) dstr_append_char(cmd, ' ');
     dstr_append(cmd, part);
 }
@@ -181,7 +181,7 @@ int program(parr_t csArgs)
     SCOPED_NEW(Display, disp);
     if (display_init(disp))
     {
-        CALL5(disp, fill_rect, 0, 0, disp->width, disp->height, CALL3(disp, color, 0, 0, 0));
+        CALL(disp, fill_rect, 0, 0, disp->width, disp->height, CALL(disp, color, 0, 0, 0));
         draw_bgrt_logo(disp);
     }
 

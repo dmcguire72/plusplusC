@@ -27,7 +27,7 @@
     #define XXC_NORETURN     __declspec(noreturn)
     #define XXC_UNUSED
     #define XXC_USED
-    #define XXC_PRINT_VALIDATE(fmt, args)
+    #define XXC_PRINTF_VALIDATE(fmt, args)
 #else
     #define XXC_LIKELY(x)   (x)
     #define XXC_UNLIKELY(x) (x)
@@ -36,7 +36,7 @@
     #define XXC_UNUSED
     #define XXC_LABEL_UNUSED
     #define XXC_USED
-    #define XXC_PRINT_VALIDATE(fmt, args)
+    #define XXC_PRINTF_VALIDATE(fmt, args)
 #endif
 
 #if defined(__has_attribute)
@@ -235,5 +235,13 @@ typedef i64 s64;
         #define __func__ "<unknown>"
     #endif
 #endif
+
+#define _PAIR_T(t1, t2) struct { t1 first; t2 second; }
+#define DEF_PAIR_T(t1, t2, name) typedef struct _##name { t1 first; t2 second; } name
+#define PAIR_EXPAND_ARGS(var) var.first, var.second
+
+#define _TUPLE_T(t1, t2, t3) struct { t1 first; t2 second; t3 third; }
+#define DEF_TUPLE_T(t1, t2, t3, name) typedef struct _##name { t1 first; t2 second; t3 third; } name
+#define TUPLE_EXPAND_ARGS(var) var.first, var.second, var.third
 
 #endif

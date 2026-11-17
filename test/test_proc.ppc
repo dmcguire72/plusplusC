@@ -56,9 +56,9 @@ static Process *new_blocker(void)
     Process *p = process_new(T_BLOCK);
     if (p != nullptr && T_BLOCK_ARG != nullptr)
     {
-        CALL1(p, add_arg, T_BLOCK_ARG);
+        CALL(p, add_arg, T_BLOCK_ARG);
         if (T_BLOCK_ARG2 != nullptr)
-            CALL1(p, add_arg, T_BLOCK_ARG2);
+            CALL(p, add_arg, T_BLOCK_ARG2);
     }
     return p;
 }
@@ -69,7 +69,7 @@ static i64 read_all(Stream *s, char *buf, size_t cap)
     char   chunk[64];
     for (;;)
     {
-        i64 n = CALL2(s, read, chunk, sizeof(chunk));
+        i64 n = CALL(s, read, chunk, sizeof(chunk));
         if (n <= 0)
             break;
         for (i64 i = 0; i < n; i++)
@@ -594,31 +594,31 @@ static bool test_processstream_pipe(void)
     ASSERT(processstream_pipe(&r, &w));
     ASSERT(IS_A(r, ProcessStream) && IS_A(w, Stream));
 
-    ASSERT(CALL3(w, fprintf, "%s-%d", "abc", 12) == 6);
-    ASSERT(CALL1(w, fprintln, "!") == 2);
+    ASSERT(CALL(w, fprintf, "%s-%d", "abc", 12) == 6);
+    ASSERT(CALL(w, fprintln, "!") == 2);
 
     char buf[32];
-    ASSERT(CALL2(r, read, buf, sizeof(buf)) == 8);
+    ASSERT(CALL(r, read, buf, sizeof(buf)) == 8);
     ASSERT(memcmp(buf, "abc-12!\n", 8) == 0);
-    ASSERT(!CALL0(r, eof));
+    ASSERT(!CALL(r, eof));
 
-    ASSERT(CALL2(r, write, "x", 1) < 0);
-    ASSERT(CALL2(w, read, buf, 1) < 0);
-    ASSERT(CALL2(r, read, nullptr, 4) == 0);
-    ASSERT(CALL2(r, read, buf, 0) == 0);
-    ASSERT(CALL2(w, write, nullptr, 4) == 0);
-    ASSERT(CALL2(w, seek, 0, FS_SEEK_SET) == -1);
-    ASSERT(CALL0(w, tell) == -1);
+    ASSERT(CALL(r, write, "x", 1) < 0);
+    ASSERT(CALL(w, read, buf, 1) < 0);
+    ASSERT(CALL(r, read, nullptr, 4) == 0);
+    ASSERT(CALL(r, read, buf, 0) == 0);
+    ASSERT(CALL(w, write, nullptr, 4) == 0);
+    ASSERT(CALL(w, seek, 0, FS_SEEK_SET) == -1);
+    ASSERT(CALL(w, tell) == -1);
 
-    CALL0(w, close);
-    CALL0(w, close);
-    ASSERT(CALL2(w, write, "x", 1) < 0);
+    CALL(w, close);
+    CALL(w, close);
+    ASSERT(CALL(w, write, "x", 1) < 0);
 
-    ASSERT(CALL2(r, read, buf, sizeof(buf)) == 0);
-    ASSERT(CALL0(r, eof) == 1);
+    ASSERT(CALL(r, read, buf, sizeof(buf)) == 0);
+    ASSERT(CALL(r, eof) == 1);
 
-    CALL0(r, close);
-    ASSERT(CALL2(r, read, buf, 1) < 0);
+    CALL(r, close);
+    ASSERT(CALL(r, read, buf, 1) < 0);
 
     REMOVE(r);
     REMOVE(w);
@@ -634,7 +634,7 @@ static bool test_processstream_epipe_and_wrap(void)
     sighandler_t prev = signal(SIGPIPE, SIG_IGN);
 #endif
     REMOVE(r);
-    ASSERT(CALL2(w, write, "x", 1) == -PROC_EPIPE);
+    ASSERT(CALL(w, write, "x", 1) == -PROC_EPIPE);
 #if defined(XXC_PROC_POSIX)
     signal(SIGPIPE, prev);
 #endif
@@ -644,7 +644,7 @@ static bool test_processstream_epipe_and_wrap(void)
     ASSERT(proc_pipe(p, PROC_PIPE_CLOEXEC) == 0);
     Stream *borrowed = processstream_wrap(p[1], false, true, false);
     ASSERT(borrowed != nullptr);
-    ASSERT(CALL2(borrowed, write, "k", 1) == 1);
+    ASSERT(CALL(borrowed, write, "k", 1) == 1);
     REMOVE(borrowed);
 
     char c = 0;
@@ -658,36 +658,36 @@ static bool test_process_capture_output(void)
 {
     SCOPED_NEW(Process, dummy);
     ASSERT(dummy != nullptr);
-    ASSERT(!CALL0(dummy, start));
+    ASSERT(!CALL(dummy, start));
 
     Process *p = process_new(T_SH);
     ASSERT(p != nullptr);
-    ASSERT(CALL1(p, add_arg, T_SH_FLAG));
-    ASSERT(CALL1(p, add_arg, T_SCRIPT_CAPTURE));
-    ASSERT(!CALL1(p, add_arg, nullptr));
-    ASSERT(CALL1(p, redirect, PROCESS_STDOUT | PROCESS_STDERR));
+    ASSERT(CALL(p, add_arg, T_SH_FLAG));
+    ASSERT(CALL(p, add_arg, T_SCRIPT_CAPTURE));
+    ASSERT(!CALL(p, add_arg, nullptr));
+    ASSERT(CALL(p, redirect, PROCESS_STDOUT | PROCESS_STDERR));
 
-    ASSERT(!CALL0(p, wait) && !CALL0(p, poll) && !CALL0(p, is_running));
-    ASSERT(!CALL1(p, kill, SIGTERM));
-    ASSERT(CALL0(p, get_stdout) == nullptr);
+    ASSERT(!CALL(p, wait) && !CALL(p, poll) && !CALL(p, is_running));
+    ASSERT(!CALL(p, kill, SIGTERM));
+    ASSERT(CALL(p, get_stdout) == nullptr);
 
-    ASSERT(CALL0(p, start));
-    ASSERT(!CALL0(p, start));
-    ASSERT(!CALL1(p, add_arg, "late") && !CALL1(p, redirect, 0));
-    ASSERT(CALL0(p, get_pid) > 0);
-    ASSERT(CALL0(p, get_stdin) == nullptr);
+    ASSERT(CALL(p, start));
+    ASSERT(!CALL(p, start));
+    ASSERT(!CALL(p, add_arg, "late") && !CALL(p, redirect, 0));
+    ASSERT(CALL(p, get_pid) > 0);
+    ASSERT(CALL(p, get_stdin) == nullptr);
 
     char out[64], err[64];
-    ASSERT(read_all(CALL0(p, get_stdout), out, sizeof(out)) == 6);
-    ASSERT(read_all(CALL0(p, get_stderr), err, sizeof(err)) == 5);
+    ASSERT(read_all(CALL(p, get_stdout), out, sizeof(out)) == 6);
+    ASSERT(read_all(CALL(p, get_stderr), err, sizeof(err)) == 5);
     ASSERT_STR_EQ(out, "hello\n");
     ASSERT_STR_EQ(err, "oops\n");
 
-    ASSERT(CALL0(p, wait));
-    ASSERT(CALL0(p, wait));
-    ASSERT(CALL0(p, get_exit_code) == 3 && CALL0(p, get_term_signal) == 0);
-    ASSERT(!CALL0(p, is_running) && CALL0(p, poll));
-    ASSERT(!CALL1(p, kill, SIGTERM));
+    ASSERT(CALL(p, wait));
+    ASSERT(CALL(p, wait));
+    ASSERT(CALL(p, get_exit_code) == 3 && CALL(p, get_term_signal) == 0);
+    ASSERT(!CALL(p, is_running) && CALL(p, poll));
+    ASSERT(!CALL(p, kill, SIGTERM));
 
     REMOVE(p);
     return true;
@@ -698,21 +698,21 @@ static bool test_process_stdin_roundtrip(void)
     SCOPED_NEW(Process, unused);
     Process *p = new_blocker();
     ASSERT(p != nullptr);
-    ASSERT(CALL1(p, redirect, PROCESS_STDIN | PROCESS_STDOUT));
-    ASSERT(CALL0(p, start));
+    ASSERT(CALL(p, redirect, PROCESS_STDIN | PROCESS_STDOUT));
+    ASSERT(CALL(p, start));
 
-    Stream *in = CALL0(p, get_stdin);
+    Stream *in = CALL(p, get_stdin);
     ASSERT(in != nullptr);
-    ASSERT(CALL2(in, fprintf, "ping %d\n", 7) == 7);
+    ASSERT(CALL(in, fprintf, "ping %d\n", 7) == 7);
 
-    CALL0(p, close_stdin);
-    CALL0(p, close_stdin);
+    CALL(p, close_stdin);
+    CALL(p, close_stdin);
 
     char out[32];
-    ASSERT(read_all(CALL0(p, get_stdout), out, sizeof(out)) == 7);
+    ASSERT(read_all(CALL(p, get_stdout), out, sizeof(out)) == 7);
     ASSERT_STR_EQ(out, "ping 7\n");
 
-    ASSERT(CALL0(p, wait) && CALL0(p, get_exit_code) == 0);
+    ASSERT(CALL(p, wait) && CALL(p, get_exit_code) == 0);
     REMOVE(p);
     return true;
 }
@@ -720,16 +720,16 @@ static bool test_process_stdin_roundtrip(void)
 static bool test_process_merge_stderr(void)
 {
     Process *p = process_new(T_SH);
-    ASSERT(CALL1(p, add_arg, T_SH_FLAG));
-    ASSERT(CALL1(p, add_arg, T_SCRIPT_MERGE));
-    ASSERT(CALL1(p, redirect, PROCESS_MERGE_ERR));
-    ASSERT(CALL0(p, start));
-    ASSERT(CALL0(p, get_stderr) == nullptr);
+    ASSERT(CALL(p, add_arg, T_SH_FLAG));
+    ASSERT(CALL(p, add_arg, T_SCRIPT_MERGE));
+    ASSERT(CALL(p, redirect, PROCESS_MERGE_ERR));
+    ASSERT(CALL(p, start));
+    ASSERT(CALL(p, get_stderr) == nullptr);
 
     char out[32];
-    read_all(CALL0(p, get_stdout), out, sizeof(out));
+    read_all(CALL(p, get_stdout), out, sizeof(out));
     ASSERT_STR_EQ(out, "a\nb\n");
-    ASSERT(CALL0(p, wait) && CALL0(p, get_exit_code) == 0);
+    ASSERT(CALL(p, wait) && CALL(p, get_exit_code) == 0);
     REMOVE(p);
     return true;
 }
@@ -737,26 +737,26 @@ static bool test_process_merge_stderr(void)
 static bool test_process_signal_and_poll(void)
 {
     Process *p = new_blocker();
-    ASSERT(CALL1(p, redirect, PROCESS_STDIN));
-    ASSERT(CALL0(p, start));
+    ASSERT(CALL(p, redirect, PROCESS_STDIN));
+    ASSERT(CALL(p, start));
 
-    ASSERT(CALL0(p, is_running));
-    ASSERT(!CALL0(p, poll));
-    ASSERT(CALL1(p, kill, SIGKILL));
+    ASSERT(CALL(p, is_running));
+    ASSERT(!CALL(p, poll));
+    ASSERT(CALL(p, kill, SIGKILL));
 
-    ASSERT(CALL0(p, wait));
-    ASSERT(CALL0(p, get_term_signal) == SIGKILL);
-    ASSERT(CALL0(p, get_exit_code) == -1);
-    ASSERT(!CALL0(p, is_running));
+    ASSERT(CALL(p, wait));
+    ASSERT(CALL(p, get_term_signal) == SIGKILL);
+    ASSERT(CALL(p, get_exit_code) == -1);
+    ASSERT(!CALL(p, is_running));
     REMOVE(p);
 
     Process *q = new_blocker();
-    ASSERT(CALL1(q, redirect, PROCESS_STDIN));
-    ASSERT(CALL0(q, start));
-    CALL0(q, close_stdin);
-    for (int i = 0; i < 2000 && !CALL0(q, poll); i++)
+    ASSERT(CALL(q, redirect, PROCESS_STDIN));
+    ASSERT(CALL(q, start));
+    CALL(q, close_stdin);
+    for (int i = 0; i < 2000 && !CALL(q, poll); i++)
         thread_sleep_ms(5);
-    ASSERT(CALL0(q, poll) && CALL0(q, get_exit_code) == T_BLOCK_EMPTY_EXIT);
+    ASSERT(CALL(q, poll) && CALL(q, get_exit_code) == T_BLOCK_EMPTY_EXIT);
     REMOVE(q);
     return true;
 }
@@ -768,16 +768,16 @@ static bool test_process_start_failures(void)
     ASSERT(process_new_runnable(nullptr) == nullptr);
 
     Process *p = process_new(T_MISSING);
-    ASSERT(CALL1(p, redirect, PROCESS_STDIN | PROCESS_STDOUT | PROCESS_STDERR));
-    ASSERT(!CALL0(p, start));
-    ASSERT(CALL0(p, get_pid) == -1 && CALL0(p, get_stdin) == nullptr);
-    ASSERT(!CALL0(p, is_running));
+    ASSERT(CALL(p, redirect, PROCESS_STDIN | PROCESS_STDOUT | PROCESS_STDERR));
+    ASSERT(!CALL(p, start));
+    ASSERT(CALL(p, get_pid) == -1 && CALL(p, get_stdin) == nullptr);
+    ASSERT(!CALL(p, is_running));
     REMOVE(p);
 
     Process *q = new_blocker();
-    ASSERT(CALL1(q, redirect, PROCESS_STDIN));
-    ASSERT(CALL0(q, start));
-    proc_pid_t pid = CALL0(q, get_pid);
+    ASSERT(CALL(q, redirect, PROCESS_STDIN));
+    ASSERT(CALL(q, start));
+    proc_pid_t pid = CALL(q, get_pid);
     REMOVE(q);
     ASSERT(proc_kill(pid, SIGKILL) == 0);
     ASSERT(proc_wait(pid, nullptr, 0) == pid);
@@ -790,8 +790,8 @@ static bool test_process_runnable_unsupported_win(void)
     SCOPED_NEW(Runnable, job);
     Process *p = process_new_runnable(job);
     ASSERT(p != nullptr);
-    ASSERT(!CALL0(p, start));
-    ASSERT(!CALL0(p, is_running) && CALL0(p, get_pid) == -1);
+    ASSERT(!CALL(p, start));
+    ASSERT(!CALL(p, is_running) && CALL(p, get_pid) == -1);
     REMOVE(p);
     return true;
 }
@@ -828,7 +828,7 @@ IMPLEMENT(ProcJob, void *, run, (void *self))
     ProcJob *this = (ProcJob *)self;
 
     char line[8];
-    i64 n = this->use_stdin ? CALL2(cin(), read, line, sizeof(line) - 1) : 0;
+    i64 n = this->use_stdin ? CALL(cin(), read, line, sizeof(line) - 1) : 0;
     char *copy = (char *)malloc(64);
 
     printf("child:%d:", (int)n);
@@ -851,20 +851,20 @@ static bool test_process_runnable(void)
 
     Process *p = process_new_runnable((Runnable *)job);
     ASSERT(p != nullptr);
-    ASSERT(CALL1(p, redirect, PROCESS_STDIN | PROCESS_STDOUT | PROCESS_STDERR));
-    ASSERT(CALL0(p, start));
+    ASSERT(CALL(p, redirect, PROCESS_STDIN | PROCESS_STDOUT | PROCESS_STDERR));
+    ASSERT(CALL(p, start));
 
-    Stream *job_in = CALL0(p, get_stdin);
-    ASSERT(CALL2(job_in, write, "z", 1) == 1);
-    CALL0(p, close_stdin);
+    Stream *job_in = CALL(p, get_stdin);
+    ASSERT(CALL(job_in, write, "z", 1) == 1);
+    CALL(p, close_stdin);
 
     char out[32], err[32];
-    read_all(CALL0(p, get_stdout), out, sizeof(out));
-    read_all(CALL0(p, get_stderr), err, sizeof(err));
+    read_all(CALL(p, get_stdout), out, sizeof(out));
+    read_all(CALL(p, get_stderr), err, sizeof(err));
     ASSERT_STR_EQ(out, "child:1:z");
     ASSERT_STR_EQ(err, "\n");
 
-    ASSERT(CALL0(p, wait) && CALL0(p, get_exit_code) == 5);
+    ASSERT(CALL(p, wait) && CALL(p, get_exit_code) == 5);
     REMOVE(p);
 
     ProcJob *job2 = NEW(ProcJob);
@@ -875,10 +875,10 @@ static bool test_process_runnable(void)
     ProcJob *job3 = NEW(ProcJob);
     job3->code = 300;
     Process *r = process_new_runnable((Runnable *)job3);
-    ASSERT(CALL1(r, redirect, PROCESS_STDOUT));
-    ASSERT(CALL0(r, start));
-    ASSERT(CALL0(r, wait));
-    ASSERT(CALL0(r, get_exit_code) == (300 & 0xff));
+    ASSERT(CALL(r, redirect, PROCESS_STDOUT));
+    ASSERT(CALL(r, start));
+    ASSERT(CALL(r, wait));
+    ASSERT(CALL(r, get_exit_code) == (300 & 0xff));
     REMOVE(r);
     REMOVE(job);
     REMOVE(job3);
@@ -916,13 +916,13 @@ static bool test_process_runnable_merge_stderr(void)
 {
     MergeJob *job = NEW(MergeJob);
     Process *p = process_new_runnable((Runnable *)job);
-    ASSERT(CALL1(p, redirect, PROCESS_MERGE_ERR));
-    ASSERT(CALL0(p, start));
+    ASSERT(CALL(p, redirect, PROCESS_MERGE_ERR));
+    ASSERT(CALL(p, start));
 
     char out[8];
-    read_all(CALL0(p, get_stdout), out, sizeof(out));
+    read_all(CALL(p, get_stdout), out, sizeof(out));
     ASSERT_STR_EQ(out, "oe");
-    ASSERT(CALL0(p, wait) && CALL0(p, get_exit_code) == 0);
+    ASSERT(CALL(p, wait) && CALL(p, get_exit_code) == 0);
     REMOVE(p);
     REMOVE(job);
     return true;
@@ -951,9 +951,9 @@ static int child_no_descriptors_proc(void *arg)
     else
     {
         Process *p = process_new("/bin/true");
-        if (p == nullptr || !CALL1(p, redirect, PROCESS_STDIN | PROCESS_STDOUT | PROCESS_STDERR))
+        if (p == nullptr || !CALL(p, redirect, PROCESS_STDIN | PROCESS_STDOUT | PROCESS_STDERR))
             rc = 14;
-        else if (CALL0(p, start) || CALL0(p, get_pid) != -1)
+        else if (CALL(p, start) || CALL(p, get_pid) != -1)
             rc = 15;
         REMOVE(p);
     }
@@ -1003,10 +1003,10 @@ static int proc_test_startup(parr_t args)
         char buf[256];
         for (;;)
         {
-            i64 n = CALL2(cin(), read, buf, sizeof(buf));
+            i64 n = CALL(cin(), read, buf, sizeof(buf));
             if (n <= 0)
                 break;
-            CALL2(cout(), write, buf, (size_t)n);
+            CALL(cout(), write, buf, (size_t)n);
         }
         return 0;
     }

@@ -54,8 +54,8 @@ int program(parr_t csArgs)
     Application *app = AS(Application, demo);
 
     // dynamic invoking
-    CALL1(app, parse_args, &csArgs);
-    int exit_code = CALL0(app, main);
+    CALL(app, parse_args, &csArgs);
+    int exit_code = CALL(app, main);
 
     // run destructor + free
     REMOVE(demo);
@@ -205,14 +205,14 @@ void fwrite_demo(void)
     Stream *file = fopen("log.txt", "w");
     if (!file)
     {
-        CALL1(cerr(), println, "Failed to open file for writing.");
+        CALL(cerr(), println, "Failed to open file for writing.");
         return;
     }
 
-    CALL2(file, printf, "Application started: %s\n", "DemoApp");
-    CALL3(file, printf, "Count: %d, Float: %f\n", 42, 3.14159);
+    CALL(file, printf, "Application started: %s\n", "DemoApp");
+    CALL(file, printf, "Count: %d, Float: %f\n", 42, 3.14159);
 
-    CALL1(file, println, "static text.");
+    CALL(file, println, "static text.");
 
     REMOVE(file);
 }
@@ -225,12 +225,12 @@ void fwrite_demo(void)
 
 void stdio_demo(void)
 {
-    CALL1(cout(), println, "Hello, World!");
-    CALL2(cerr(), printf, "Uh oh!: code %d\n", 500);
+    CALL(cout(), println, "Hello, World!");
+    CALL(cerr(), printf, "Uh oh!: code %d\n", 500);
 
     dstr_t input = {0};
-    CALL1(cin(), readline, &input);
-    CALL2(cout(), printf, "You entered: %s\n", input.data);
+    CALL(cin(), readline, &input);
+    CALL(cout(), printf, "You entered: %s\n", input.data);
     dstr_free(&input);
 }
 ```
@@ -249,19 +249,19 @@ void path_demo(void)
     dstr_free(&root_str);
 
     // join paths (handles separators)
-    CALL1(path, join, "app/debug.log");
+    CALL(path, join, "app/debug.log");
 
     // output normalized path
-    dstr_t full_path = CALL0(path, data);
+    dstr_t full_path = CALL(path, data);
     printf("Full Path: %s\n", full_path.data);
     dstr_free(&full_path);
 
     // extract directory (parent) and filename (base)
-    FSPath *parent = CALL0(path, parent);
-    FSPath *base   = CALL0(path, base);
+    FSPath *parent = CALL(path, parent);
+    FSPath *base   = CALL(path, base);
 
-    dstr_t parent_str = CALL0(parent, data);
-    dstr_t base_str   = CALL0(base, data);
+    dstr_t parent_str = CALL(parent, data);
+    dstr_t base_str   = CALL(base, data);
 
     printf("Parent dir: %s\n", parent_str.data);
     printf("filename:    %s\n", base_str.data);
@@ -282,12 +282,12 @@ bool file_ops_demo(void)
     dstr_free(&name);
 
     // create an empty file
-    if (!CALL0(p, touch)) {
+    if (!CALL(p, touch)) {
         REMOVE(p); return false;
     }
 
     // delete the file
-    if (!CALL0(p, remove)) {
+    if (!CALL(p, remove)) {
         REMOVE(p); return false;
     }
 
@@ -309,19 +309,19 @@ void memory_stream_demo(void)
     Stream *stream = AS(Stream, ms);
 
     // write formatted data into memory
-    CALL3(stream, printf, "Message: %s (ID: %d)", "MemoryStream Test", 101);
+    CALL(stream, printf, "Message: %s (ID: %d)", "MemoryStream Test", 101);
 
     // rewind back to the beginning
-    CALL2(stream, seek, 0, FS_SEEK_SET);
+    CALL(stream, seek, 0, FS_SEEK_SET);
 
     // read bytes back from the memory stream
     char buffer[64] = {0};
-    i64 bytes_read = CALL2(stream, read, buffer, sizeof(buffer) - 1);
-    CALL2(cout(), printf, "Read %lld bytes from memory: %s\n", bytes_read, buffer);
+    i64 bytes_read = CALL(stream, read, buffer, sizeof(buffer) - 1);
+    CALL(cout(), printf, "Read %lld bytes from memory: %s\n", bytes_read, buffer);
 
     // inspect the underlying buffer directly
     const char *raw_buf = mstream_get_buffer(ms);
-    CALL2(cout(), printf, "Raw contents: %s\n", raw_buf);
+    CALL(cout(), printf, "Raw contents: %s\n", raw_buf);
 
     REMOVE(ms);
 }
@@ -342,10 +342,10 @@ static void run_server(void)
     Stream *client = tcp_accept(listener, NULL);
     if (client) 
     {
-        CALL2(client, write, "Welcome!\n", 9);
+        CALL(client, write, "Welcome!\n", 9);
         
         char buf[64] = {0};
-        CALL2(client, read, buf, sizeof(buf) - 1);
+        CALL(client, read, buf, sizeof(buf) - 1);
         printf("Client says: %s\n", buf);
         
         REMOVE(client);
@@ -361,10 +361,10 @@ static void run_client(void)
     if (!conn) return;
 
     char buf[64] = {0};
-    CALL2(conn, read, buf, sizeof(buf) - 1);
+    CALL(conn, read, buf, sizeof(buf) - 1);
     printf("Server says: %s", buf);
 
-    CALL2(conn, write, "Hello!\n", 7);
+    CALL(conn, write, "Hello!\n", 7);
     
     REMOVE(conn);
 }
@@ -381,13 +381,13 @@ void map_demo(void)
     Map *m = NEW(Map);
 
     // set values (values are void pointers)
-    CALL2(m, set, "key1", (void *)(uintptr_t)42);
-    CALL2(m, set, "key2", (void *)(uintptr_t)100);
+    CALL(m, set, "key1", (void *)(uintptr_t)42);
+    CALL(m, set, "key2", (void *)(uintptr_t)100);
 
     // check and get
-    if (CALL1(m, contains, "key1")) 
+    if (CALL(m, contains, "key1")) 
     {
-        int val = (int)(uintptr_t)CALL1(m, get, "key1");
+        int val = (int)(uintptr_t)CALL(m, get, "key1");
         printf("key1: %d\n", val);
     }
 
@@ -396,13 +396,13 @@ void map_demo(void)
     const char *key;
     void *value;
     
-    while (CALL4(m, iterate, &cursor, &key, NULL, &value)) 
+    while (CALL(m, iterate, &cursor, &key, NULL, &value)) 
     {
         printf("%s -> %d\n", key, (int)(uintptr_t)value);
     }
 
     // remove a key and free the map
-    CALL1(m, remove, "key1");
+    CALL(m, remove, "key1");
     REMOVE(m);
 }
 ```
@@ -429,10 +429,10 @@ void thread_demo(void)
     Thread *t = thread_new_fn(thread_task, &counter);
 
     // start the thread
-    CALL0(t, start);
+    CALL(t, start);
 
     // wait for it to finish
-    CALL0(t, join);
+    CALL(t, join);
 
     printf("Counter: %d\n", atomic_i32_load(&counter));
 
@@ -455,24 +455,24 @@ void process_demo(void)
 {
     // run a program, feed its stdin and read its stdout
     Process *p = process_new("sort"); // looked up in PATH
-    CALL1(p, redirect, PROCESS_STDIN | PROCESS_STDOUT);
+    CALL(p, redirect, PROCESS_STDIN | PROCESS_STDOUT);
 
-    if (CALL0(p, start))
+    if (CALL(p, start))
     {
-        Stream *in = CALL0(p, get_stdin);
-        CALL1(in, fprint, "pear\napple\n");
-        CALL0(p, close_stdin); // the child now sees end-of-file
+        Stream *in = CALL(p, get_stdin);
+        CALL(in, fprint, "pear\napple\n");
+        CALL(p, close_stdin); // the child now sees end-of-file
 
         char buf[64];
-        i64 n = CALL2(CALL0(p, get_stdout), read, buf, sizeof(buf) - 1);
+        i64 n = CALL(CALL(p, get_stdout), read, buf, sizeof(buf) - 1);
         if (n > 0)
         {
             buf[n] = '\0';
             printf("%s", buf);
         }
 
-        CALL0(p, wait);
-        printf("exit code %d\n", CALL0(p, get_exit_code));
+        CALL(p, wait);
+        printf("exit code %d\n", CALL(p, get_exit_code));
     }
 
     REMOVE(p);
@@ -482,8 +482,8 @@ void process_demo(void)
 void fork_demo(Runnable *job)
 {
     Process *p = process_new_runnable(job);
-    CALL0(p, start);
-    CALL0(p, wait);
+    CALL(p, start);
+    CALL(p, wait);
     REMOVE(p);
 }
 
@@ -493,11 +493,11 @@ void pipe_demo(void)
     Stream *reader, *writer;
     if (processstream_pipe(&reader, &writer))
     {
-        CALL1(writer, fprint, "hello");
-        CALL0(writer, close);
+        CALL(writer, fprint, "hello");
+        CALL(writer, close);
 
         char buf[8];
-        CALL2(reader, read, buf, sizeof(buf));
+        CALL(reader, read, buf, sizeof(buf));
 
         REMOVE(reader);
         REMOVE(writer);
@@ -525,15 +525,15 @@ void env_demo(void)
     env_unset("MODE");
 
     Environment *e = environment_current();
-    CALL2(e, set, "MODE", "slow");
-    const char *m = CALL2(e, get_or, "MODE", "none");
+    CALL(e, set, "MODE", "slow");
+    const char *m = CALL(e, get_or, "MODE", "none");
     (void)m;
     REMOVE(e);
 
     Process *p = process_new("mytool");
-    CALL2(p, set_env, "MODE", "slow");
-    CALL0(p, start);
-    CALL0(p, wait);
+    CALL(p, set_env, "MODE", "slow");
+    CALL(p, start);
+    CALL(p, wait);
     REMOVE(p);
 }
 ```

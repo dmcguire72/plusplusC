@@ -85,7 +85,7 @@ static bool draw_bitmap(Display *d, const u8 *data, size_t size, i32 dest_x, i32
             u8 g = px[1];
             u8 r = px[2];
 
-            u32 c = CALL3(d, color, r, g, b);
+            u32 c = CALL(d, color, r, g, b);
 
             d->fb[(u64)screen_y * d->stride + screen_x] = c;
         }

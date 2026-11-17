@@ -19,6 +19,7 @@ CLASS(Demo, Application)
     METHOD(bool, process_args, (void *self))
     FIELD(bool, showVersion)
     FIELD(bool, showAbout)
+    FIELD(bool, showAdd)
 };
 
 CLASS_EXPORT(Demo);
@@ -33,6 +34,17 @@ static void handle_sigint(int sig)
         _exit(130);
 }
 
+DEF_TUPLE_T(int, int, int, int_3_t);
+
+int_3_t add_int_3(int_3_t a, int_3_t b)
+{
+    struct _int_3_t result;
+    result.first = a.first + b.first;
+    result.second = a.second + b.second;
+    result.third = a.third + b.third;
+    return result;
+}
+
 int program(parr_t csArgs)
 {
     atomic_u8_init(&g_interrupt_count, 0);
@@ -42,8 +54,8 @@ int program(parr_t csArgs)
     Demo *demo = NEW(Demo);
     Application *base = AS(Application, demo);
 
-    CALL1(base, parse_args, &csArgs);
-    int exit_code = CALL0(base, main);
+    CALL(base, parse_args, &csArgs);
+    int exit_code = CALL(base, main);
 
     REMOVE(demo);
     return exit_code;
@@ -72,8 +84,9 @@ DECONSTRUCTOR(Demo)
 IMPLEMENT(Demo, void, configure_args, (void *self))
 {
     Demo *this = (Demo *)self;
-    CALL2(this->base.args, add_flag, "version", "Print version");
-    CALL2(this->base.args, add_flag, "about", "Print about info");
+    CALL(this->base.args, add_flag, "version", "Print version");
+    CALL(this->base.args, add_flag, "about", "Print about info");
+    CALL(this->base.args, add_flag, "add", "Add two 3D points");
 }
 
 IMPLEMENT(Demo, int, run, (void *self))
@@ -85,17 +98,25 @@ IMPLEMENT(Demo, int, run, (void *self))
 
     if (this->showVersion) 
     {
-        CALL3(cout(), fprintf, "%d.%d\n", MAJOR, MINOR);
+        CALL(cout(), fprintf, "%d.%d\n", MAJOR, MINOR);
         return 0;
     } 
     else if (this->showAbout)
     {
-        CALL1(cout(), fprintln, "++C Demo");
+        CALL(cout(), fprintln, "++C Demo");
         return 0;
     }
-    
-    CALL3(cout(), fprintf, "++C Demo %d.%d\n", MAJOR, MINOR);
-    CALL0(app, print_help);
+    else if (this->showAdd)
+    {
+            int_3_t a = { 1, 2, 3 };
+            int_3_t b = { 4, 5, 6 };
+            int_3_t c = add_int_3(a, b);
+            CALL(cout(), fprintf, "[1, 2, 3] + [4, 5, 6] = [%d, %d, %d]", TUPLE_EXPAND_ARGS(c));
+            return 0;
+    }
+
+    CALL(cout(), fprintf, "++C Demo %d.%d\n", MAJOR, MINOR);
+    CALL(app, print_help);
 
     return 0;
 }
@@ -103,10 +124,9 @@ IMPLEMENT(Demo, int, run, (void *self))
 IMPLEMENT(Demo, bool, process_args, (void *self))
 {
     Demo *this = (Demo *)self;
-    this->showVersion = CALL1(this->base.args, get_bool, "version");
-    this->showAbout = CALL1(this->base.args, get_bool, "about");
-
-    if (this->showVersion || this->showAbout) return true;
+    this->showVersion = CALL(this->base.args, get_bool, "version");
+    this->showAbout = CALL(this->base.args, get_bool, "about");
+    this->showAdd = CALL(this->base.args, get_bool, "add");
 
     return true;
 }

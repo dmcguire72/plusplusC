@@ -409,7 +409,7 @@ Stream *fopen(FSPath *path, const char *mode)
     if (path == nullptr || mode == nullptr || !mode[0])
         return nullptr;
 
-    dstr_t dsPath = CALL0(path, data);
+    dstr_t dsPath = CALL(path, data);
     char *csPath = dsPath.data;
 
     Stream *s = __fopen(csPath, mode);
@@ -499,7 +499,7 @@ i64 fwrite(Stream *s, const char *str)
     if (s == nullptr || str == nullptr)
         return -1;
 
-    return CALL2(s, write, str, strlen(str));
+    return CALL(s, write, str, strlen(str));
 }
 
 
@@ -515,7 +515,7 @@ i64 freadline(Stream *s, dstr_t *out)
 
     for (;;)
     {
-        i64 r = CALL2(s, read, &c, 1);
+        i64 r = CALL(s, read, &c, 1);
 
         if (r <= 0)
             break;

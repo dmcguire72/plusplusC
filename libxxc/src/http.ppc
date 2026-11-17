@@ -103,7 +103,7 @@ Map *http__new_string_map(void)
 {
     Map *m = NEW(Map);
     if (m != nullptr)
-        CALL1(m, set_value_free, free);
+        CALL(m, set_value_free, free);
     return m;
 }
 
@@ -159,7 +159,7 @@ i64 conn_read_raw(HTTPConnection *c, void *dst, size_t n)
 
         conn_set_rcv(c, want);
 
-        i64 r = CALL2(c->stream, read, dst, n);
+        i64 r = CALL(c->stream, read, dst, n);
 
         if (r > 0)
             return r;

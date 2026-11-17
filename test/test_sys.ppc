@@ -516,28 +516,28 @@ static bool test_socketstream_loopback(void)
     ASSERT(sock_ntohl(peer.sin_addr.s_addr) == SOCK_INADDR_LOOPBACK);
 
     char buf[32];
-    ASSERT(CALL2(client, write, "hello", 5) == 5);
-    ASSERT(CALL2(server, read, buf, sizeof(buf)) == 5);
+    ASSERT(CALL(client, write, "hello", 5) == 5);
+    ASSERT(CALL(server, read, buf, sizeof(buf)) == 5);
     ASSERT(memcmp(buf, "hello", 5) == 0);
-    ASSERT(CALL1(server, fprint, "reply") == 5);
-    ASSERT(CALL2(client, read, buf, sizeof(buf)) == 5);
+    ASSERT(CALL(server, fprint, "reply") == 5);
+    ASSERT(CALL(client, read, buf, sizeof(buf)) == 5);
 
-    ASSERT(CALL2(client, read, nullptr, 4) == 0);
-    ASSERT(CALL2(client, read, buf, 0) == 0);
-    ASSERT(CALL2(client, write, nullptr, 4) == 0);
-    ASSERT(CALL2(client, write, "x", 0) == 0);
+    ASSERT(CALL(client, read, nullptr, 4) == 0);
+    ASSERT(CALL(client, read, buf, 0) == 0);
+    ASSERT(CALL(client, write, nullptr, 4) == 0);
+    ASSERT(CALL(client, write, "x", 0) == 0);
 
-    ASSERT(CALL2(client, seek, 0, FS_SEEK_SET) == -1);
-    ASSERT(CALL0(client, tell) == -1);
+    ASSERT(CALL(client, seek, 0, FS_SEEK_SET) == -1);
+    ASSERT(CALL(client, tell) == -1);
 
-    ASSERT(CALL0(server, eof) == 0);
-    CALL0(client, close);
-    ASSERT(CALL2(server, read, buf, sizeof(buf)) == 0);
-    ASSERT(CALL0(server, eof) == 1);
+    ASSERT(CALL(server, eof) == 0);
+    CALL(client, close);
+    ASSERT(CALL(server, read, buf, sizeof(buf)) == 0);
+    ASSERT(CALL(server, eof) == 1);
 
-    ASSERT(CALL2(client, read, buf, 4) == -1);
-    ASSERT(CALL2(client, write, "x", 1) == -1);
-    CALL0(client, close);
+    ASSERT(CALL(client, read, buf, 4) == -1);
+    ASSERT(CALL(client, write, "x", 1) == -1);
+    CALL(client, close);
 
     REMOVE(client);
     REMOVE(server);
@@ -561,7 +561,7 @@ static bool test_socketstream_failures(void)
     ASSERT(a != nullptr);
     ASSERT(tcp_listen(SOCK_INADDR_LOOPBACK, bound_port(a->fd), 1) == nullptr);
 
-    CALL0(AS(Stream, a), close);
+    CALL(AS(Stream, a), close);
     ASSERT(tcp_accept(a, nullptr) == nullptr);
 
     SocketStream *dg = NEW(SocketStream);
@@ -571,10 +571,10 @@ static bool test_socketstream_failures(void)
 
     SocketStream *none = NEW(SocketStream);
     char b[4];
-    ASSERT(CALL2(AS(Stream, none), read, b, 4) == -1);
-    ASSERT(CALL2(AS(Stream, none), write, "x", 1) == -1);
-    ASSERT(CALL0(AS(Stream, none), eof) == 0);
-    CALL0(AS(Stream, none), close);
+    ASSERT(CALL(AS(Stream, none), read, b, 4) == -1);
+    ASSERT(CALL(AS(Stream, none), write, "x", 1) == -1);
+    ASSERT(CALL(AS(Stream, none), eof) == 0);
+    CALL(AS(Stream, none), close);
 
     REMOVE(none);
     REMOVE(dg);

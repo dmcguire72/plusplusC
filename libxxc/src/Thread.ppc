@@ -35,7 +35,7 @@ DECONSTRUCTOR(Thread)
 static void *thread_trampoline(void *arg)
 {
     Thread *self = (Thread *)arg;
-    return CALL0(self->target, run);
+    return CALL(self->target, run);
 }
 
 typedef struct {
@@ -46,7 +46,7 @@ typedef struct {
 static void *detached_trampoline(void *arg)
 {
     detached_state_t *state = (detached_state_t *)arg;
-    CALL0(state->target, run);
+    CALL(state->target, run);
     if (state->owns_target)
         REMOVE(state->target);
     free(state);

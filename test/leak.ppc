@@ -27,7 +27,7 @@ int program(parr_t csArgs)
     {
         LeakTest *demo = NEW(LeakTest);
         Application *app = AS(Application, demo);
-        CALL1(app, parse_args, &args);
+        CALL(app, parse_args, &args);
         REMOVE(demo);
     }
 

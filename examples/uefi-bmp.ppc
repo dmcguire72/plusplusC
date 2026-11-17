@@ -22,7 +22,7 @@ int program(parr_t csArgs)
         return 1;
     }
 
-    CALL5(disp, fill_rect, 0, 0, (i32)disp->width, (i32)disp->height, CALL3(disp, color, 20, 25, 35));
+    CALL(disp, fill_rect, 0, 0, (i32)disp->width, (i32)disp->height, CALL(disp, color, 20, 25, 35));
 
     const bmp_info_header_t *info = (const bmp_info_header_t *)(g_logo_bmp + sizeof(bmp_file_header_t));
     i32 bmp_w = info->biWidth;

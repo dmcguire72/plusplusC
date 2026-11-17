@@ -42,14 +42,14 @@ static bool file_starts_with_str(const char *path, const char *prefix)
     if (f == nullptr) return false;
     char buf[64] = {0};
     size_t n = strlen(prefix);
-    i64 got = CALL2(f, read, buf, n);
+    i64 got = CALL(f, read, buf, n);
     return got == (i64)n && memcmp(buf, prefix, n) == 0;
 }
 
 static bool file_starts_with(FSPath *path, const char *prefix)
 {
     if (path == nullptr || prefix == nullptr) return false;
-    dstr_t pathStr = CALL0(path, data);
+    dstr_t pathStr = CALL(path, data);
     bool ok = file_starts_with_str(pathStr.data, prefix);
     dstr_free(&pathStr);
     return ok;
@@ -87,9 +87,9 @@ static void test_files(void)
     Stream *f = fopen_str(path, "w");
     CHECK(f != nullptr);
     if (f == nullptr) return;
-    CALL1(f, fprintln, "hello from ++C");
-    CALL2(f, fprintf, "n=%d\n", 42);
-    CALL1(f, fprint, "tail");
+    CALL(f, fprintln, "hello from ++C");
+    CALL(f, fprintf, "n=%d\n", 42);
+    CALL(f, fprint, "tail");
     REMOVE(f);
 
     f = fopen_str(path, "r");
@@ -97,31 +97,31 @@ static void test_files(void)
     freadline(f, &line);
     CHECK(strcmp(line.data, "hello from ++C") == 0);
     dstr_free(&line);
-    CHECK(CALL0(f, tell) == 15);
-    CHECK(CALL2(f, seek, 0, FS_SEEK_END) == 24);
-    CHECK(CALL2(f, read, buf, 4) == 0);
-    CHECK(CALL0(f, eof) == 1);
-    CHECK(CALL2(f, seek, -4, FS_SEEK_END) == 20);
-    CHECK(CALL0(f, eof) == 0);
-    CHECK(CALL2(f, read, buf, 4) == 4 && memcmp(buf, "tail", 4) == 0);
-    CHECK(CALL2(f, seek, 6, FS_SEEK_SET) == 6);
-    CHECK(CALL2(f, read, buf, 4) == 4 && memcmp(buf, "from", 4) == 0);
-    CHECK(CALL2(f, seek, 2, FS_SEEK_CUR) == 12);
-    CHECK(CALL2(f, write, "x", 1) < 0);
+    CHECK(CALL(f, tell) == 15);
+    CHECK(CALL(f, seek, 0, FS_SEEK_END) == 24);
+    CHECK(CALL(f, read, buf, 4) == 0);
+    CHECK(CALL(f, eof) == 1);
+    CHECK(CALL(f, seek, -4, FS_SEEK_END) == 20);
+    CHECK(CALL(f, eof) == 0);
+    CHECK(CALL(f, read, buf, 4) == 4 && memcmp(buf, "tail", 4) == 0);
+    CHECK(CALL(f, seek, 6, FS_SEEK_SET) == 6);
+    CHECK(CALL(f, read, buf, 4) == 4 && memcmp(buf, "from", 4) == 0);
+    CHECK(CALL(f, seek, 2, FS_SEEK_CUR) == 12);
+    CHECK(CALL(f, write, "x", 1) < 0);
     REMOVE(f);
 
     f = fopen_str(path, "a");
     CHECK(f != nullptr);
-    CALL1(f, fprintln, "+appended");
+    CALL(f, fprintln, "+appended");
     REMOVE(f);
     f = fopen_str(path, "r");
-    CHECK(CALL2(f, seek, 0, FS_SEEK_END) == 34);
+    CHECK(CALL(f, seek, 0, FS_SEEK_END) == 34);
     REMOVE(f);
 
     f = fopen_str(path, "r+");
     CHECK(f != nullptr);
-    CALL2(f, seek, 0, FS_SEEK_SET);
-    CALL1(f, fprint, "HELLO");
+    CALL(f, seek, 0, FS_SEEK_SET);
+    CALL(f, fprint, "HELLO");
     REMOVE(f);
     dstr_t pathStr = dstr_new(path);
     CHECK(file_starts_with(fs_path(pathStr), "HELLO from ++C"));
@@ -130,7 +130,7 @@ static void test_files(void)
     f = fopen_str(path, "w");
     REMOVE(f);
     f = fopen_str(path, "r");
-    CHECK(CALL2(f, seek, 0, FS_SEEK_END) == 0);
+    CHECK(CALL(f, seek, 0, FS_SEEK_END) == 0);
     REMOVE(f);
 
     CHECK(fopen_str("no_such_file.txt", "r") == nullptr);
@@ -141,7 +141,7 @@ static void test_files(void)
     CHECK(f != nullptr);
     if (f)
     {
-        CHECK(CALL2(f, seek, 0, FS_SEEK_END) > 1000);
+        CHECK(CALL(f, seek, 0, FS_SEEK_END) > 1000);
         REMOVE(f);
     }
     CHECK(file_starts_with_str("EFI/BOOT/BOOTX64.EFI", "MZ"));
@@ -150,17 +150,17 @@ static void test_files(void)
     dstr_t nm = dstr_new("tmp_touch.txt");
     FSPath *p = fs_path(nm);
     dstr_free(&nm);
-    CHECK(CALL0(p, touch));
+    CHECK(CALL(p, touch));
     f = fopen_str("tmp_touch.txt", "r");
     CHECK(f != nullptr);
     REMOVE(f);
-    CHECK(CALL0(p, remove));
+    CHECK(CALL(p, remove));
     CHECK(fopen_str("tmp_touch.txt", "r") == nullptr);
-    CHECK(!CALL0(p, remove));
+    CHECK(!CALL(p, remove));
     REMOVE(p);
 
     f = fopen_str(path, "w");
-    CALL1(f, fprintln, "written by ++C running on bare metal");
+    CALL(f, fprintln, "written by ++C running on bare metal");
     REMOVE(f);
 }
 
@@ -171,18 +171,18 @@ static void test_other_classes(void)
     MemoryStream *ms = NEW(MemoryStream);
     Stream *s = AS(Stream, ms);
     CHECK(s != nullptr);
-    CALL2(s, fprintf, "id=%d", 101);
-    CALL2(s, seek, 0, FS_SEEK_SET);
+    CALL(s, fprintf, "id=%d", 101);
+    CALL(s, seek, 0, FS_SEEK_SET);
     char buf[16] = {0};
-    CHECK(CALL2(s, read, buf, 15) == 6 && strcmp(buf, "id=101") == 0);
+    CHECK(CALL(s, read, buf, 15) == 6 && strcmp(buf, "id=101") == 0);
     REMOVE(ms);
 
     Map *m = NEW(Map);
-    CALL2(m, set, "k", (void *)(uintptr_t)42);
-    CHECK(CALL1(m, contains, "k"));
-    CHECK((uintptr_t)CALL1(m, get, "k") == 42);
-    CALL1(m, remove, "k");
-    CHECK(!CALL1(m, contains, "k"));
+    CALL(m, set, "k", (void *)(uintptr_t)42);
+    CHECK(CALL(m, contains, "k"));
+    CHECK((uintptr_t)CALL(m, get, "k") == 42);
+    CALL(m, remove, "k");
+    CHECK(!CALL(m, contains, "k"));
     REMOVE(m);
 }
 
@@ -215,8 +215,8 @@ int program(parr_t csArgs)
     IoTest *t = NEW(IoTest);
     Application *app = AS(Application, t);
 
-    CALL1(app, parse_args, &csArgs);
-    int rc = CALL0(app, main);
+    CALL(app, parse_args, &csArgs);
+    int rc = CALL(app, main);
 
     REMOVE(t);
     return rc;

@@ -515,7 +515,7 @@ static void res_build_head(HTTPResponse *r, bool known_len, u64 len, http_buf_t 
 
 static bool res_flush(HTTPResponse *r, http_buf_t *b)
 {
-    bool ok = !b->oom && r->conn != nullptr && CALL2(r->conn, write_all, b->data, b->len);
+    bool ok = !b->oom && r->conn != nullptr && CALL(r->conn, write_all, b->data, b->len);
     if (ok)
         r->bytes_out += b->len;
     else
@@ -576,8 +576,8 @@ IMPLEMENT(HTTPResponse, bool, write, (void *self, const void *data, size_t len))
         else
         {
             ok = res_flush(this, &b)
-              && CALL2(this->conn, write_all, data, len)
-              && CALL2(this->conn, write_all, "\r\n", 2);
+              && CALL(this->conn, write_all, data, len)
+              && CALL(this->conn, write_all, "\r\n", 2);
             if (ok)
                 this->bytes_out += len + 2;
             else
@@ -590,7 +590,7 @@ IMPLEMENT(HTTPResponse, bool, write, (void *self, const void *data, size_t len))
     }
     else
     {
-        ok = CALL2(this->conn, write_all, data, len);
+        ok = CALL(this->conn, write_all, data, len);
         if (ok)
             this->bytes_out += len;
         else
@@ -629,7 +629,7 @@ IMPLEMENT(HTTPResponse, bool, end, (void *self))
     }
     else if (this->chunked && !this->suppress_body)
     {
-        ok = CALL2(this->conn, write_all, "0\r\n\r\n", 5);
+        ok = CALL(this->conn, write_all, "0\r\n\r\n", 5);
         if (ok)
             this->bytes_out += 5;
         else
@@ -675,7 +675,7 @@ IMPLEMENT(HTTPResponse, bool, send, (void *self, int status, const char *content
         ok = res_flush(this, &b);
         if (ok && !this->suppress_body && len > 0)
         {
-            ok = CALL2(this->conn, write_all, body, len);
+            ok = CALL(this->conn, write_all, body, len);
             if (ok)
             {
                 this->bytes_out += len;
@@ -723,10 +723,10 @@ IMPLEMENT(HTTPResponse, bool, send_file, (void *self, const char *path, const ch
     if (f == nullptr)
         return false;
 
-    i64 size = CALL2(f, seek, 0, FS_SEEK_END);
-    if (size < 0 || CALL2(f, seek, 0, FS_SEEK_SET) < 0)
+    i64 size = CALL(f, seek, 0, FS_SEEK_END);
+    if (size < 0 || CALL(f, seek, 0, FS_SEEK_SET) < 0)
     {
-        CALL0(f, close);
+        CALL(f, close);
         REMOVE(f);
         return false;
     }
@@ -734,12 +734,12 @@ IMPLEMENT(HTTPResponse, bool, send_file, (void *self, const char *path, const ch
     u8 *buf = (u8 *)malloc(HTTP_FILE_CHUNK);
     if (buf == nullptr)
     {
-        CALL0(f, close);
+        CALL(f, close);
         REMOVE(f);
         return false;
     }
 
-    i64 got = CALL2(f, read, buf, (size_t)(size < (i64)HTTP_FILE_CHUNK ? size : (i64)HTTP_FILE_CHUNK));
+    i64 got = CALL(f, read, buf, (size_t)(size < (i64)HTTP_FILE_CHUNK ? size : (i64)HTTP_FILE_CHUNK));
     bool readable = got >= 0 && (size == 0 || got > 0);
 
     if (readable)
@@ -762,7 +762,7 @@ IMPLEMENT(HTTPResponse, bool, send_file, (void *self, const char *path, const ch
                 if (got <= 0)
                 {
                     size_t want = (size_t)(remaining < (i64)HTTP_FILE_CHUNK ? remaining : (i64)HTTP_FILE_CHUNK);
-                    got = CALL2(f, read, buf, want);
+                    got = CALL(f, read, buf, want);
                     if (got <= 0)
                         break;
                 }
@@ -781,7 +781,7 @@ IMPLEMENT(HTTPResponse, bool, send_file, (void *self, const char *path, const ch
     }
 
     free(buf);
-    CALL0(f, close);
+    CALL(f, close);
     REMOVE(f);
     return readable;
 }
@@ -791,7 +791,7 @@ static void static_error(HTTPResponse *res, int code)
     const char *t = http_status_text(code);
     char body[64];
     int n = snprintf(body, sizeof(body), "%d %s\n", code, t);
-    CALL4(res, send, code, "text/plain; charset=utf-8", body, (size_t)(n > 0 ? n : 0));
+    CALL(res, send, code, "text/plain; charset=utf-8", body, (size_t)(n > 0 ? n : 0));
 }
 
 static bool static_path_safe(const char *rel, size_t n)
@@ -826,7 +826,7 @@ static bool static_path_safe(const char *rel, size_t n)
 
 void http_serve_static(HTTPRequest *req, HTTPResponse *res, const char *root, const char *prefix)
 {
-    if (!CALL1(req, is, "GET") && !CALL1(req, is, "HEAD"))
+    if (!CALL(req, is, "GET") && !CALL(req, is, "HEAD"))
     {
         res_store(res, "Allow", "GET, HEAD", true);
         static_error(res, 405);
@@ -892,7 +892,7 @@ void http_serve_static(HTTPRequest *req, HTTPResponse *res, const char *root, co
             Stream *probe = fopen_str(full.data, "rb");
             if (probe != nullptr)
             {
-                CALL0(probe, close);
+                CALL(probe, close);
                 REMOVE(probe);
 
                 dstr_t loc = dstr_new(req->path.data);

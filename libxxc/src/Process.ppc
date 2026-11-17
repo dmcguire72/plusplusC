@@ -102,7 +102,7 @@ IMPLEMENT(Process, bool, set_env, (void *self, const char *name, const char *val
             return false; /* GCOV_EXCL_LINE */
     }
 
-    return CALL2(this->env, set, name, value);
+    return CALL(this->env, set, name, value);
 }
 
 IMPLEMENT(Process, bool, unset_env, (void *self, const char *name))
@@ -119,7 +119,7 @@ IMPLEMENT(Process, bool, unset_env, (void *self, const char *name))
             return false; /* GCOV_EXCL_LINE */
     }
 
-    CALL1(this->env, unset, name);
+    CALL(this->env, unset, name);
     return true;
 }
 
@@ -198,7 +198,7 @@ static XXC_NORETURN void run_child(Process *p, u32 mask, bool merge,
         ok = proc_dup2(err_p[1], 2) >= 0;
 
     if (ok && p->env != nullptr)
-        ok = CALL0(p->env, apply);
+        ok = CALL(p->env, apply);
 
     close_pair(in_p);
     close_pair(out_p);
@@ -208,7 +208,7 @@ static XXC_NORETURN void run_child(Process *p, u32 mask, bool merge,
 
     /* GCOV_EXCL_START */
     if (ok)
-        code = (int)((intptr_t)CALL0(p->target, run) & 0xff);
+        code = (int)((intptr_t)CALL(p->target, run) & 0xff);
     /* GCOV_EXCL_STOP */
 
     _exit(code);
@@ -297,7 +297,7 @@ IMPLEMENT(Process, bool, start, (void *self))
 
         if (this->env != nullptr)
         {
-            envp = CALL0(this->env, to_envp);
+            envp = CALL(this->env, to_envp);
             /* GCOV_EXCL_START */
             if (envp == nullptr)
                 goto done;

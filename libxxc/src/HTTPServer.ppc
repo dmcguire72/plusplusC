@@ -239,7 +239,7 @@ static void send_simple(HTTPResponse *res, int code)
 {
     char body[96];
     int n = snprintf(body, sizeof(body), "%d %s\n", code, http_status_text(code));
-    CALL4(res, send, code, "text/plain; charset=utf-8", body, (size_t)(n > 0 ? n : 0));
+    CALL(res, send, code, "text/plain; charset=utf-8", body, (size_t)(n > 0 ? n : 0));
 }
 
 static void dispatch(HTTPServer *srv, HTTPRequest *req, HTTPResponse *res)
@@ -279,7 +279,7 @@ static void dispatch(HTTPServer *srv, HTTPRequest *req, HTTPResponse *res)
     if (path_matched)
     {
         if (allow.len > 0)
-            CALL2(res, set_header, "Allow", (const char *)allow.data);
+            CALL(res, set_header, "Allow", (const char *)allow.data);
         send_simple(res, 405);
     }
     else if (srv->fallback != nullptr)
@@ -472,12 +472,12 @@ static int read_request(HTTPServer *srv, HTTPConnection *conn, HTTPRequest *req,
             return 417;
         if (req->version_minor >= 1 && kind != HTTP_BODY_NONE && conn->rlen == conn->rpos)
         {
-            if (!CALL2(conn, write_all, "HTTP/1.1 100 Continue\r\n\r\n", 25))
+            if (!CALL(conn, write_all, "HTTP/1.1 100 Continue\r\n\r\n", 25))
                 return HTTP_PARSE_IOERR;
         }
     }
 
-    CALL1(conn, set_deadline, start_ms + srv->request_timeout_ms);
+    CALL(conn, set_deadline, start_ms + srv->request_timeout_ms);
 
     rc = http__read_body(conn, kind, length, srv->max_body_bytes, &req->body, &req->body_len);
     return rc;
@@ -502,7 +502,7 @@ static void lingering_close(HTTPConnection *c)
         return;
 
     sock_shutdown_write(((SocketStream *)c->stream)->fd);
-    CALL1(c, set_deadline, clock_monotonic_ms() + 500);
+    CALL(c, set_deadline, clock_monotonic_ms() + 500);
 
     size_t drained = 0;
     c->io_error = c->eof = c->timed_out = false;
@@ -525,7 +525,7 @@ static bool under_pressure(HTTPServer *srv)
 static void access_log(HTTPRequest *req, HTTPResponse *res, u64 t0)
 {
     char ip[24] = "-";
-    CALL2(req, peer_ip, ip, sizeof(ip));
+    CALL(req, peer_ip, ip, sizeof(ip));
     printf("%s \"%s %s\" %d %u %ums\n", ip, req->method.data, req->target.data,
            res->status, (unsigned)res->bytes_out, (unsigned)(clock_monotonic_ms() - t0));
 }
@@ -542,12 +542,12 @@ static void serve_connection(HTTPServer *srv, HTTPConnection *conn, const sock_a
         if (!first && pressure && idle > 1000)
             idle = 1000;
 
-        CALL1(conn, set_deadline, clock_monotonic_ms() + idle);
+        CALL(conn, set_deadline, clock_monotonic_ms() + idle);
         if (!http__wait_data(conn))
             break;
 
         u64 t0 = clock_monotonic_ms();
-        CALL1(conn, set_deadline, t0 + srv->headers_timeout_ms);
+        CALL(conn, set_deadline, t0 + srv->headers_timeout_ms);
 
         HTTPRequest *req = NEW(HTTPRequest);
         if (req == nullptr)
@@ -585,11 +585,11 @@ static void serve_connection(HTTPServer *srv, HTTPConnection *conn, const sock_a
         res->keep_alive = req->keep_alive && !atomic_bool_load(&srv->stopping) &&
                           !under_pressure(srv) && (nreq + 1 < srv->max_requests_per_conn);
 
-        CALL1(conn, set_deadline, 0);
+        CALL(conn, set_deadline, 0);
 
         dispatch(srv, req, res);
         if (!res->ended)
-            CALL0(res, end);
+            CALL(res, end);
 
         nreq++;
         atomic_u64_fetch_add(&srv->served, 1);
@@ -644,9 +644,9 @@ static void *worker_main(void *arg)
         sock_set_nodelay(((SocketStream *)cs)->fd, true);
         sock_set_send_timeout(((SocketStream *)cs)->fd, srv->send_timeout_ms);
 
-        CALL1(conn, accept, cs);
+        CALL(conn, accept, cs);
         serve_connection(srv, conn, &peer);
-        CALL0(conn, close);
+        CALL(conn, close);
 
         atomic_u32_fetch_sub(&srv->active, 1);
     }

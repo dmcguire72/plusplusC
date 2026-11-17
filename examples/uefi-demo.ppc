@@ -33,7 +33,7 @@ CLASS_INFO(Rect, Shape);
 IMPLEMENT(Rect, void, draw, (void *self, Display *d))
 {
     Rect *r = self;
-    CALL5(d, fill_rect, r->base.x, r->base.y, r->w, r->h, r->base.color);
+    CALL(d, fill_rect, r->base.x, r->base.y, r->w, r->h, r->base.color);
 }
 
 CONSTRUCTOR(Rect)
@@ -67,7 +67,7 @@ IMPLEMENT(Circle, void, draw, (void *self, Display *d))
     for (i32 dy = -c->r; dy <= c->r; dy++)
     {
         i32 dx = isqrt(c->r * c->r - dy * dy);
-        CALL5(d, fill_rect, c->base.x - dx, c->base.y + dy, 2 * dx + 1, 1, c->base.color);
+        CALL(d, fill_rect, c->base.x - dx, c->base.y + dy, 2 * dx + 1, 1, c->base.color);
     }
 }
 
@@ -84,7 +84,7 @@ static Rect *make_rect(Display *d, i32 x, i32 y, i32 w, i32 h, u8 r, u8 g, u8 b)
 {
     Rect *s = NEW(Rect);
     s->base.x = x; s->base.y = y; s->w = w; s->h = h;
-    s->base.color = CALL3(d, color, r, g, b);
+    s->base.color = CALL(d, color, r, g, b);
     return s;
 }
 
@@ -92,7 +92,7 @@ static Circle *make_circle(Display *d, i32 x, i32 y, i32 r, u8 cr, u8 cg, u8 cb)
 {
     Circle *s = NEW(Circle);
     s->base.x = x; s->base.y = y; s->r = r;
-    s->base.color = CALL3(d, color, cr, cg, cb);
+    s->base.color = CALL(d, color, cr, cg, cb);
     return s;
 }
 
@@ -113,7 +113,7 @@ int program(parr_t csArgs)
     for (u32 y = 0; y < disp->height; y++)
     {
         u8 v = (u8)(30 + (y * 120) / disp->height);
-        CALL5(disp, fill_rect, 0, (i32)y, W, 1, CALL3(disp, color, 10, v / 2, v));
+        CALL(disp, fill_rect, 0, (i32)y, W, 1, CALL(disp, color, 10, v / 2, v));
     }
 
     parr_t scene = parr_new(nullptr, 0);
@@ -125,7 +125,7 @@ int program(parr_t csArgs)
     for (size_t i = 0; i < scene.len; i++)
     {
         Shape *s = AS(Shape, scene.data[i]);
-        CALL1(s, draw, disp);
+        CALL(s, draw, disp);
     }
 
     con->SetCursorPosition(con, 0, 0);

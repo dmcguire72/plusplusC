@@ -23,7 +23,7 @@ static void conn_drop_stream(HTTPConnection *c)
 {
     if (c->stream)
     {
-        CALL0(c->stream, close);
+        CALL(c->stream, close);
         REMOVE(c->stream);
         c->stream = nullptr;
     }
@@ -107,7 +107,7 @@ IMPLEMENT(HTTPConnection, bool, write_all, (void *self, const void *buf, size_t 
 
     while (len > 0)
     {
-        i64 w = CALL2(this->stream, write, p, len);
+        i64 w = CALL(this->stream, write, p, len);
         if (w <= 0)
         {
             this->io_error = true;
@@ -545,7 +545,7 @@ IMPLEMENT(HTTPConnection, bool, send_request_ex, (void *self, const char *method
     if (body != nullptr && body_len > 0)
         http_buf_append(&b, body, body_len);
 
-    bool ok = !b.oom && CALL2(this, write_all, b.data, b.len);
+    bool ok = !b.oom && CALL(this, write_all, b.data, b.len);
     http_buf_free(&b);
 
     this->last_was_head = (strcmp(method, "HEAD") == 0);
@@ -593,7 +593,7 @@ IMPLEMENT(HTTPConnection, bool, send_response, (void *self, int status_code, con
     if (blen > 0)
         http_buf_append(&b, body, blen);
 
-    bool ok = !b.oom && CALL2(this, write_all, b.data, b.len);
+    bool ok = !b.oom && CALL(this, write_all, b.data, b.len);
     http_buf_free(&b);
     return ok;
 }

@@ -110,7 +110,7 @@ IMPLEMENT(ArgParser, void, parse, (void *self, const parr_t *argv))
         ArgFlag *flag = argparser_find(this, arg + 2);
         if (flag == nullptr)
         {
-            CALL2(cout(), fprintf, "Unknown option: %s\n", arg);
+            CALL(cout(), fprintf, "Unknown option: %s\n", arg);
             continue;
         }
 
@@ -176,7 +176,7 @@ IMPLEMENT(ArgParser, void, print_flags, (void *self))
         if (flag->has_value)
             dstr_append(&left, " <value>");
 
-        CALL4(cout(), fprintf, "  %-*s  %s\n", 
+        CALL(cout(), fprintf, "  %-*s  %s\n", 
                (int)max_width, 
                left.data ? left.data : "", 
                flag->description.data ? flag->description.data : "");

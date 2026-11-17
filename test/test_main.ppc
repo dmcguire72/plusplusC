@@ -157,7 +157,7 @@ static bool test_oop_system(void)
     Animal *animal = AS(Animal, dog);
     ASSERT(animal != nullptr);
     
-    const char* sound = CALL0(animal, speak);
+    const char* sound = CALL(animal, speak);
     ASSERT_STR_EQ(sound, "Woof!");
     
     Stream *invalid = AS(Stream, dog);
@@ -173,20 +173,20 @@ static bool test_memory_stream(void)
     Stream *stream = AS(Stream, ms);
     
     const char *msg = "++C Stream Data";
-    i64 written = CALL2(stream, write, msg, strlen(msg));
+    i64 written = CALL(stream, write, msg, strlen(msg));
     ASSERT(written == (i64)strlen(msg));
     
-    CALL2(stream, seek, 0, FS_SEEK_SET);
+    CALL(stream, seek, 0, FS_SEEK_SET);
     
     char buf[32] = {0};
-    i64 read_bytes = CALL2(stream, read, buf, 3);
+    i64 read_bytes = CALL(stream, read, buf, 3);
     ASSERT(read_bytes == 3);
     ASSERT_STR_EQ(buf, "++C");
     
-    CALL2(stream, seek, 0, FS_SEEK_END);
+    CALL(stream, seek, 0, FS_SEEK_END);
     char dummy;
-    CALL2(stream, read, &dummy, 1);
-    ASSERT(CALL0(stream, eof) == 1);
+    CALL(stream, read, &dummy, 1);
+    ASSERT(CALL(stream, eof) == 1);
     
     REMOVE(ms);
     return true;
@@ -198,10 +198,10 @@ static bool test_fspath(void)
     FSPath *p = fs_path(initial);
     dstr_free(&initial);
     
-    CALL1(p, join, "local/bin/app");
+    CALL(p, join, "local/bin/app");
     
-    FSPath *b = CALL0(p, base);
-    dstr_t b_str = CALL0(b, data);
+    FSPath *b = CALL(p, base);
+    dstr_t b_str = CALL(b, data);
     ASSERT_STR_EQ(b_str.data, "app");
     dstr_free(&b_str);
     
@@ -1815,26 +1815,26 @@ static bool test_oop_map_basic(void)
 {
     Map *m = NEW(Map);
     ASSERT(m != nullptr);
-    ASSERT(CALL0(m, len) == 0);
-    ASSERT(!CALL1(m, contains, "a"));
-    ASSERT(CALL1(m, get, "a") == nullptr);
+    ASSERT(CALL(m, len) == 0);
+    ASSERT(!CALL(m, contains, "a"));
+    ASSERT(CALL(m, get, "a") == nullptr);
 
-    ASSERT(CALL2(m, set, "a", (void *)(uintptr_t)1));
-    ASSERT(CALL2(m, set, "b", (void *)(uintptr_t)2));
-    ASSERT(CALL2(m, set, "c", (void *)(uintptr_t)3));
-    ASSERT(CALL0(m, len) == 3);
-    ASSERT((uintptr_t)CALL1(m, get, "a") == 1);
-    ASSERT((uintptr_t)CALL1(m, get, "b") == 2);
-    ASSERT(CALL1(m, contains, "b"));
-    ASSERT(!CALL1(m, contains, "z"));
+    ASSERT(CALL(m, set, "a", (void *)(uintptr_t)1));
+    ASSERT(CALL(m, set, "b", (void *)(uintptr_t)2));
+    ASSERT(CALL(m, set, "c", (void *)(uintptr_t)3));
+    ASSERT(CALL(m, len) == 3);
+    ASSERT((uintptr_t)CALL(m, get, "a") == 1);
+    ASSERT((uintptr_t)CALL(m, get, "b") == 2);
+    ASSERT(CALL(m, contains, "b"));
+    ASSERT(!CALL(m, contains, "z"));
 
-    ASSERT(CALL2(m, set, "b", (void *)(uintptr_t)20));   
-    ASSERT(CALL0(m, len) == 3);
-    ASSERT((uintptr_t)CALL1(m, get, "b") == 20);
+    ASSERT(CALL(m, set, "b", (void *)(uintptr_t)20));   
+    ASSERT(CALL(m, len) == 3);
+    ASSERT((uintptr_t)CALL(m, get, "b") == 20);
 
-    ASSERT(CALL1(m, remove, "b"));
-    ASSERT(CALL0(m, len) == 2);
-    ASSERT(!CALL1(m, remove, "b"));
+    ASSERT(CALL(m, remove, "b"));
+    ASSERT(CALL(m, len) == 2);
+    ASSERT(!CALL(m, remove, "b"));
 
     REMOVE(m);
     return true;
@@ -1843,11 +1843,11 @@ static bool test_oop_map_basic(void)
 static bool test_oop_map_null_value_disambiguation(void)
 {
     Map *m = NEW(Map);
-    ASSERT(CALL2(m, set, "k", nullptr));
-    ASSERT(CALL1(m, get, "k") == nullptr);          
-    ASSERT(CALL1(m, contains, "k"));             
+    ASSERT(CALL(m, set, "k", nullptr));
+    ASSERT(CALL(m, get, "k") == nullptr);          
+    ASSERT(CALL(m, contains, "k"));             
     void *v = (void *)1;
-    ASSERT(CALL2(m, try_get, "k", &v));
+    ASSERT(CALL(m, try_get, "k", &v));
     ASSERT(v == nullptr);
     REMOVE(m);
     return true;
@@ -1858,13 +1858,13 @@ static bool test_oop_map_binary_keys(void)
     Map *m = NEW(Map);
     char k1[] = { 0, 1, 2, 0, 3 };
     char k2[] = { 0, 1, 2, 0, 4 };                
-    ASSERT(CALL3(m, set_bytes, k1, sizeof(k1), (void *)(uintptr_t)11));
-    ASSERT(CALL3(m, set_bytes, k2, sizeof(k2), (void *)(uintptr_t)22));
-    ASSERT((uintptr_t)CALL2(m, get_bytes, k1, sizeof(k1)) == 11);
-    ASSERT((uintptr_t)CALL2(m, get_bytes, k2, sizeof(k2)) == 22);
-    ASSERT(!CALL2(m, contains_bytes, k1, sizeof(k1) - 1));   
-    ASSERT(CALL2(m, remove_bytes, k1, sizeof(k1)));
-    ASSERT(!CALL2(m, contains_bytes, k1, sizeof(k1)));
+    ASSERT(CALL(m, set_bytes, k1, sizeof(k1), (void *)(uintptr_t)11));
+    ASSERT(CALL(m, set_bytes, k2, sizeof(k2), (void *)(uintptr_t)22));
+    ASSERT((uintptr_t)CALL(m, get_bytes, k1, sizeof(k1)) == 11);
+    ASSERT((uintptr_t)CALL(m, get_bytes, k2, sizeof(k2)) == 22);
+    ASSERT(!CALL(m, contains_bytes, k1, sizeof(k1) - 1));   
+    ASSERT(CALL(m, remove_bytes, k1, sizeof(k1)));
+    ASSERT(!CALL(m, contains_bytes, k1, sizeof(k1)));
     REMOVE(m);
     return true;
 }
@@ -1879,12 +1879,12 @@ static bool test_oop_map_iterate(void)
     for (int i = 0; i < N; i++)
     {
         snprintf(buf, sizeof(buf), "k%d", i);
-        ASSERT(CALL2(m, set, buf, (void *)(uintptr_t)i));
+        ASSERT(CALL(m, set, buf, (void *)(uintptr_t)i));
     }
 
     size_t it = 0; const char *k; size_t kl; void *v;
     int count = 0;
-    while (CALL4(m, iterate, &it, &k, &kl, &v))
+    while (CALL(m, iterate, &it, &k, &kl, &v))
     {
         int idx = (int)(uintptr_t)v;
         ASSERT(idx >= 0 && idx < N && !seen[idx]);
@@ -1895,8 +1895,8 @@ static bool test_oop_map_iterate(void)
     ASSERT(count == N);
     for (int i = 0; i < N; i++) ASSERT(seen[i]);
 
-    CALL0(m, clear);
-    ASSERT(CALL0(m, len) == 0);
+    CALL(m, clear);
+    ASSERT(CALL(m, len) == 0);
     REMOVE(m);
     return true;
 }
@@ -1905,21 +1905,21 @@ static bool test_oop_map_owns_objects_via_c_delete(void)
 {
     g_counted_destroyed = 0;
     Map *m = NEW(Map);
-    CALL1(m, set_value_free, (void (*)(void *))c_delete);
+    CALL(m, set_value_free, (void (*)(void *))c_delete);
 
     Counted *a = NEW(Counted); a->tag = 1;
     Counted *b = NEW(Counted); b->tag = 2;
     Counted *c = NEW(Counted); c->tag = 3;
-    ASSERT(CALL2(m, set, "a", a));
-    ASSERT(CALL2(m, set, "b", b));
-    ASSERT(CALL2(m, set, "c", c));
+    ASSERT(CALL(m, set, "a", a));
+    ASSERT(CALL(m, set, "b", b));
+    ASSERT(CALL(m, set, "c", c));
     ASSERT(g_counted_destroyed == 0);
 
     Counted *replacement = NEW(Counted); replacement->tag = 99;
-    ASSERT(CALL2(m, set, "a", replacement));      
+    ASSERT(CALL(m, set, "a", replacement));      
     ASSERT(g_counted_destroyed == 1);
 
-    ASSERT(CALL1(m, remove, "b"));                 
+    ASSERT(CALL(m, remove, "b"));                 
     ASSERT(g_counted_destroyed == 2);
 
     REMOVE(m);                                     
@@ -1968,15 +1968,15 @@ static bool test_oop_thread_runnable_basic(void)
 
     Thread *t = thread_new((Runnable *)task);
     ASSERT(t != nullptr);
-    ASSERT(!CALL0(t, is_joinable));                
-    ASSERT(CALL0(t, get_id) == 0);
-    ASSERT(CALL0(t, start));
-    ASSERT(CALL0(t, is_joinable));
+    ASSERT(!CALL(t, is_joinable));                
+    ASSERT(CALL(t, get_id) == 0);
+    ASSERT(CALL(t, start));
+    ASSERT(CALL(t, is_joinable));
 
-    void *result = CALL0(t, join);
+    void *result = CALL(t, join);
     ASSERT((uintptr_t)result == 1000);
     ASSERT(atomic_i32_load(&counter) == 1000);
-    ASSERT(!CALL0(t, is_joinable));                
+    ASSERT(!CALL(t, is_joinable));                
 
     REMOVE(t);
     REMOVE(task);                                  
@@ -1997,8 +1997,8 @@ static bool test_oop_thread_fn(void)
 
     Thread *t = thread_new_fn(oop_thread_fn_task, &counter);
     ASSERT(t != nullptr);
-    ASSERT(CALL0(t, start));
-    void *result = CALL0(t, join);
+    ASSERT(CALL(t, start));
+    void *result = CALL(t, join);
     ASSERT((uintptr_t)result == 500);
     ASSERT(atomic_i32_load(&counter) == 500);
 
@@ -2021,11 +2021,11 @@ static bool test_oop_thread_multiple_concurrent(void)
         tasks[i]->n = PER;
         t[i] = thread_new((Runnable *)tasks[i]);
         ASSERT(t[i] != nullptr);
-        ASSERT(CALL0(t[i], start));
+        ASSERT(CALL(t[i], start));
     }
     for (int i = 0; i < NTHREADS; i++)
     {
-        CALL0(t[i], join);
+        CALL(t[i], join);
         REMOVE(t[i]);
         REMOVE(tasks[i]);
     }
@@ -2048,8 +2048,8 @@ static bool test_oop_thread_start_detached(void)
 
     Thread *t = thread_new_fn(oop_detached_task, &flag);
     ASSERT(t != nullptr);
-    ASSERT(CALL0(t, start_detached));
-    ASSERT(!CALL0(t, is_joinable));
+    ASSERT(CALL(t, start_detached));
+    ASSERT(!CALL(t, is_joinable));
     REMOVE(t);                                      
 
     u64 t0 = clock_monotonic_ms();
@@ -2073,7 +2073,7 @@ static bool test_oop_thread_destructor_auto_detaches(void)
     atomic_i32_init(&flag, 0);
 
     Thread *t = thread_new_fn(oop_forgotten_task, &flag);
-    ASSERT(CALL0(t, start));
+    ASSERT(CALL(t, start));
     REMOVE(t);            
 
     u64 t0 = clock_monotonic_ms();
@@ -2096,8 +2096,8 @@ static bool test_oop_thread_reused_runnable(void)
     for (int round = 0; round < 5; round++)
     {
         Thread *t = thread_new((Runnable *)task);
-        ASSERT(CALL0(t, start));
-        CALL0(t, join);
+        ASSERT(CALL(t, start));
+        CALL(t, join);
         REMOVE(t);
     }
     ASSERT(atomic_i32_load(&counter) == 50);
@@ -2108,9 +2108,9 @@ static bool test_oop_thread_reused_runnable(void)
 static bool test_oop_thread_start_guards(void)
 {
     Thread *empty = thread_new(nullptr);
-    ASSERT(!CALL0(empty, start));                    
-    ASSERT(CALL0(empty, join) == nullptr);               
-    ASSERT(!CALL0(empty, detach));
+    ASSERT(!CALL(empty, start));                    
+    ASSERT(CALL(empty, join) == nullptr);               
+    ASSERT(!CALL(empty, detach));
     REMOVE(empty);
 
     static atomic_i32_t counter;
@@ -2119,9 +2119,9 @@ static bool test_oop_thread_start_guards(void)
     task->counter = &counter;
     task->n = 1;
     Thread *t = thread_new((Runnable *)task);
-    ASSERT(CALL0(t, start));
-    ASSERT(!CALL0(t, start));                         
-    CALL0(t, join);
+    ASSERT(CALL(t, start));
+    ASSERT(!CALL(t, start));                         
+    CALL(t, join);
     REMOVE(t);
     REMOVE(task);
     return true;
@@ -2155,7 +2155,7 @@ IMPLEMENT(MapWriterTask, void *, run, (void *self))
 {
     MapWriterTask *this = (MapWriterTask *)self;
     mutex_lock(this->lock);
-    CALL2(this->map, set, this->key, (void *)(uintptr_t)this->value);
+    CALL(this->map, set, this->key, (void *)(uintptr_t)this->value);
     mutex_unlock(this->lock);
     return nullptr;
 }
@@ -2177,21 +2177,21 @@ static bool test_oop_threads_writing_to_shared_map(void)
         snprintf(tasks[i]->key, sizeof(tasks[i]->key), "k%d", i);
         tasks[i]->value = i * 10;
         t[i] = thread_new((Runnable *)tasks[i]);
-        ASSERT(CALL0(t[i], start));
+        ASSERT(CALL(t[i], start));
     }
     for (int i = 0; i < N; i++)
     {
-        CALL0(t[i], join);
+        CALL(t[i], join);
         REMOVE(t[i]);
         REMOVE(tasks[i]);
     }
 
-    ASSERT(CALL0(m, len) == N);
+    ASSERT(CALL(m, len) == N);
     for (int i = 0; i < N; i++)
     {
         char key[16];
         snprintf(key, sizeof(key), "k%d", i);
-        ASSERT((uintptr_t)CALL1(m, get, key) == (uintptr_t)(i * 10));
+        ASSERT((uintptr_t)CALL(m, get, key) == (uintptr_t)(i * 10));
     }
 
     mutex_destroy(&lock);
