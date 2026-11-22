@@ -494,11 +494,13 @@ static bool test_mutex_scoped_macros(void)
     ASSERT(!mutex_is_locked(&m));
     ASSERT(g_guard_value == 1);
 
+#ifdef MUTEX_SCOPED
     {
         MUTEX_SCOPED(&m);
         ASSERT(mutex_is_locked(&m));
     }
     ASSERT(!mutex_is_locked(&m));
+#endif
 
     mutex_t recursive = MUTEX_RECURSIVE_INIT;
     ASSERT(mutex_lock(&recursive) == MUTEX_SUCCESS);

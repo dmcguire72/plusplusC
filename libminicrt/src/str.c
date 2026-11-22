@@ -4,6 +4,11 @@
 
 #include <str.h>
 
+#if defined(_MSC_VER) && !defined(__clang__)
+#pragma function(strlen)
+#pragma function(strcmp)
+#endif
+
 size_t strlen(const char *s)
 {
     size_t len = 0;

@@ -9,6 +9,8 @@
 #if defined(_MSC_VER) && !defined(__clang__)
 #pragma function(memcpy)
 #pragma function(memset)
+#pragma function(memmove)
+#pragma function(memcmp)
 #pragma optimize("", off) 
 #endif
 

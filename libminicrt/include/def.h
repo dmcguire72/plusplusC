@@ -26,8 +26,13 @@
     #define XXC_NOINLINE     __declspec(noinline)
     #define XXC_NORETURN     __declspec(noreturn)
     #define XXC_UNUSED
+    #define XXC_LABEL_UNUSED
     #define XXC_USED
     #define XXC_PRINTF_VALIDATE(fmt, args)
+    #ifndef _ACRTIMP
+        // fix <intrin.h>/<malloc.h> from msft headers re-declaring alloc funcs as dllimport
+        #define _ACRTIMP
+    #endif
 #else
     #define XXC_LIKELY(x)   (x)
     #define XXC_UNLIKELY(x) (x)
@@ -83,12 +88,16 @@
 
 #define XXC_CACHELINE 64
 
-#if !defined(__STDC_VERSION__) || __STDC_VERSION__ <= 201710L
-    #ifndef bool
-        typedef int bool;
-    #endif
-    #ifndef nullptr
-        #define nullptr ((void *)0) 
+// msvc has no c23 bool/true/false/nullptr keyword for some wierd reason
+#if !defined(__cplusplus) && (!defined(__STDC_VERSION__) || __STDC_VERSION__ <= 201710L || (defined(_MSC_VER) && !defined(__clang__)))
+    #if defined(_MSC_VER) && !defined(__clang__)
+        #ifndef bool
+            typedef _Bool bool;
+        #endif
+    #else
+        #ifndef bool
+            typedef int bool;
+        #endif
     #endif
     #ifndef nullptr
         #define nullptr ((void *)0)
@@ -98,16 +107,6 @@
     #endif
     #ifndef false
         #define false 0
-    #endif
-#else
-    #ifndef nullptr
-        #define nullptr ((void *)0) 
-    #endif
-    #ifndef nullptr
-        #define nullptr nullptr
-    #else
-        #undef nullptr
-        #define nullptr nullptr
     #endif
 #endif
 
@@ -151,14 +150,7 @@
     typedef __INTMAX_TYPE__  intmax_t;
     typedef __UINTMAX_TYPE__ uintmax_t;
 #elif defined(_MSC_VER)
-    typedef char* va_list;
-    void __cdecl __va_start(va_list*, ...);
-    #define va_start(ap, x) (__va_start(&ap, x))
-    #define va_arg(ap, t)   ((sizeof(t) > 8 || (sizeof(t) & (sizeof(t) - 1)) != 0) ? \
-                             **(t**)((ap += 8) - 8) : \
-                             *(t*)((ap += 8) - 8))
-    #define va_end(ap)      ((void)(ap = (va_list)0))
-    #define va_copy(d, s)   ((void)((d) = (s)))
+    #include <stdarg.h>
 
     typedef signed char        int8_t;
     typedef unsigned char      uint8_t;
@@ -193,6 +185,54 @@
 
     typedef long long          intmax_t;
     typedef unsigned long long uintmax_t;
+#endif
+
+#if defined(_MSC_VER) && !defined(__clang__)
+    #ifndef __thread
+        #define __thread __declspec(thread)
+    #endif
+#endif
+
+#define XXC_PASTE_(a, b) a##b
+#define XXC_PASTE(a, b)  XXC_PASTE_(a, b)
+
+#if defined(__GNUC__) || defined(__clang__)
+    #define XXC_INF __builtin_inf()
+    #define XXC_NAN __builtin_nan("")
+#else
+    static __inline double xxc_double_from_bits(u64 bits)
+    {
+        union { u64 u; double d; } x;
+        x.u = bits;
+        return x.d;
+    }
+    #define XXC_INF xxc_double_from_bits(0x7FF0000000000000ULL)
+    #define XXC_NAN xxc_double_from_bits(0x7FF8000000000000ULL)
+#endif
+
+#define XXC_PRIO_DEFAULT 65535
+
+#if defined(__GNUC__) || defined(__clang__)
+    #define XXC_CONSTRUCTOR(fn, prio)  __attribute__((constructor(prio))) static void fn(void)
+    #define XXC_DESTRUCTOR(fn, prio)   __attribute__((destructor(prio)))  static void fn(void)
+    #define XXC_CONSTRUCTOR_DEFAULT(fn) __attribute__((constructor)) static void fn(void)
+    #define XXC_DESTRUCTOR_DEFAULT(fn)  __attribute__((destructor))  static void fn(void)
+#elif defined(_MSC_VER)
+    typedef struct xxc_initrec { u32 prio; void (*fn)(void); } xxc_initrec_t;
+
+    #pragma section(".rdata$xxc_im", read)
+    #pragma section(".rdata$xxc_tm", read)
+
+    #define XXC_INITREC_(sec, fn, prio)                                          \
+        static void fn(void);                                                    \
+        __declspec(allocate(sec)) static const xxc_initrec_t XXC_PASTE(fn, _rec) = \
+            { (u32)(prio), fn };                                                 \
+        static void fn(void)
+
+    #define XXC_CONSTRUCTOR(fn, prio)   XXC_INITREC_(".rdata$xxc_im", fn, prio)
+    #define XXC_DESTRUCTOR(fn, prio)    XXC_INITREC_(".rdata$xxc_tm", fn, prio)
+    #define XXC_CONSTRUCTOR_DEFAULT(fn) XXC_CONSTRUCTOR(fn, XXC_PRIO_DEFAULT)
+    #define XXC_DESTRUCTOR_DEFAULT(fn)  XXC_DESTRUCTOR(fn, XXC_PRIO_DEFAULT)
 #endif
 
 typedef i8  s8;

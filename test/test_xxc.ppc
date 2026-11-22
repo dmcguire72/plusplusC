@@ -67,8 +67,8 @@ static bool test_class_runtime(void)
     REMOVE(c);
     ASSERT(g_counter_dtors == before + 1);
 
+    SCOPED_NEW_BLOCK(Counter, sc)
     {
-        SCOPED_NEW(Counter, sc);
         ASSERT(sc != nullptr);
     }
     ASSERT(g_counter_dtors == before + 2);

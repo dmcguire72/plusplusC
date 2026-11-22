@@ -54,11 +54,98 @@ XXC_PE_INITSEC(".CRT$XTZ") XXC_USED static xxc_pe_fn const xxc_xt_end   = 0;
 #if defined(__GNUC__) || defined(__clang__)
     #define XXC_PE_OPAQUE(p) __asm__ volatile("" : "+r"(p))
 #else
-    #define XXC_PE_OPAQUE(p) ((void)0)
+    // make optimizer not able to assume two section markers belong to the same object.
+    #define XXC_PE_OPAQUE(p) do { void *volatile xxc_v_ = (void *)(p); (p) = xxc_v_; } while (0)
+#endif
+
+#if defined(_MSC_VER) && !defined(__clang__)
+    #pragma section(".rdata$xxc_ia", read)
+    #pragma section(".rdata$xxc_iz", read)
+    #pragma section(".rdata$xxc_ta", read)
+    #pragma section(".rdata$xxc_tz", read)
+
+    __declspec(allocate(".rdata$xxc_ia")) static const xxc_initrec_t xxc_ir_begin = { 0, 0 };
+    __declspec(allocate(".rdata$xxc_iz")) static const xxc_initrec_t xxc_ir_end   = { 0, 0 };
+    __declspec(allocate(".rdata$xxc_ta")) static const xxc_initrec_t xxc_tr_begin = { 0, 0 };
+    __declspec(allocate(".rdata$xxc_tz")) static const xxc_initrec_t xxc_tr_end   = { 0, 0 };
+
+    static void xxc_pe_run_ctor_records(void)
+    {
+        const xxc_initrec_t *b = &xxc_ir_begin;
+        const xxc_initrec_t *e = &xxc_ir_end;
+        u32  done = 0;
+        bool have_done = false;
+        XXC_PE_OPAQUE(b);
+        XXC_PE_OPAQUE(e);
+
+        for (;;)
+        {
+            bool found = false;
+            u32  best = 0;
+            for (const xxc_initrec_t *p = b; p < e; p++)
+            {
+                if (p->fn == nullptr || (have_done && p->prio <= done))
+                    continue;
+                if (!found || p->prio < best)
+                {
+                    best = p->prio;
+                    found = true;
+                }
+            }
+            if (!found)
+                break;
+            for (const xxc_initrec_t *p = b; p < e; p++)
+                if (p->fn != nullptr && p->prio == best)
+                    p->fn();
+            done = best;
+            have_done = true;
+        }
+    }
+
+    static void xxc_pe_run_dtor_records(void)
+    {
+        const xxc_initrec_t *b = &xxc_tr_begin;
+        const xxc_initrec_t *e = &xxc_tr_end;
+        u32  done = 0;
+        bool have_done = false;
+        XXC_PE_OPAQUE(b);
+        XXC_PE_OPAQUE(e);
+
+        for (;;)
+        {
+            bool found = false;
+            u32  best = 0;
+            for (const xxc_initrec_t *p = b; p < e; p++)
+            {
+                if (p->fn == nullptr || (have_done && p->prio >= done))
+                    continue;
+                if (!found || p->prio > best)
+                {
+                    best = p->prio;
+                    found = true;
+                }
+            }
+            if (!found)
+                break;
+            for (const xxc_initrec_t *p = e; p > b; )
+            {
+                --p;
+                if (p->fn != nullptr && p->prio == best)
+                    p->fn();
+            }
+            done = best;
+            have_done = true;
+        }
+    }
+#else
+    #define xxc_pe_run_ctor_records() ((void)0)
+    #define xxc_pe_run_dtor_records() ((void)0)
 #endif
 
 static void xxc_pe_run_ctors(void)
 {
+    xxc_pe_run_ctor_records();
+
     xxc_pe_fn const *b = &xxc_xc_begin;
     xxc_pe_fn const *e = &xxc_xc_end;
     XXC_PE_OPAQUE(b);
@@ -80,6 +167,8 @@ static void xxc_pe_run_dtors(void)
         if (*p != nullptr)
             (*p)();
     }
+
+    xxc_pe_run_dtor_records();
 }
 
 #endif /* __MINGW32__ */

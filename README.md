@@ -109,7 +109,7 @@ cmake --build build
 Windows (MSVC)
 
 ```batch
-cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake -B build
 cmake --build build --config Release
 
 .\build\Release\main.exe

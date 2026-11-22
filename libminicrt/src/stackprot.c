@@ -45,13 +45,16 @@ XXC_USED uintptr_t __security_cookie = (uintptr_t)0xBB40E64Eu;
 #endif
 
 #if defined(_WIN32)
+#if defined(_MSC_VER) && !defined(__clang__)
+#include <windows.h>
+#else
 #define va_start vastart_guard
 #include <windows.h>
 #undef va_start
+#endif
 
-__declspec(dllimport) LONG WINAPI BCryptGenRandom(void *hAlgorithm, unsigned char *pbBuffer,
-                                                  ULONG cbBuffer, ULONG dwFlags);
-#define XXC_BCRYPT_USE_SYSTEM_PREFERRED_RNG 0x00000002UL
+#include <bcrypt.h>
+#define XXC_BCRYPT_USE_SYSTEM_PREFERRED_RNG BCRYPT_USE_SYSTEM_PREFERRED_RNG
 
 static XXC_NO_SSP uint64_t xxc_mix64(uint64_t x)
 {

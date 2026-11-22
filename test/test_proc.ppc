@@ -656,7 +656,8 @@ static bool test_processstream_epipe_and_wrap(void)
 
 static bool test_process_capture_output(void)
 {
-    SCOPED_NEW(Process, dummy);
+    SCOPED_NEW_BLOCK(Process, dummy)
+    {
     ASSERT(dummy != nullptr);
     ASSERT(!CALL(dummy, start));
 
@@ -690,12 +691,16 @@ static bool test_process_capture_output(void)
     ASSERT(!CALL(p, kill, SIGTERM));
 
     REMOVE(p);
+    }
     return true;
 }
 
 static bool test_process_stdin_roundtrip(void)
 {
-    SCOPED_NEW(Process, unused);
+    SCOPED_NEW_BLOCK(Process, unused)
+    {
+        (void)unused;
+    }
     Process *p = new_blocker();
     ASSERT(p != nullptr);
     ASSERT(CALL(p, redirect, PROCESS_STDIN | PROCESS_STDOUT));
@@ -787,12 +792,14 @@ static bool test_process_start_failures(void)
 #if defined(_WIN32)
 static bool test_process_runnable_unsupported_win(void)
 {
-    SCOPED_NEW(Runnable, job);
+    SCOPED_NEW_BLOCK(Runnable, job)
+    {
     Process *p = process_new_runnable(job);
     ASSERT(p != nullptr);
     ASSERT(!CALL(p, start));
     ASSERT(!CALL(p, is_running) && CALL(p, get_pid) == -1);
     REMOVE(p);
+    }
     return true;
 }
 #endif

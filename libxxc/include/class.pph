@@ -238,11 +238,17 @@ static inline int c_is_a(
 
 #define SCOPED_NEW(Type, name) \
     SCOPED Type *name = NEW(Type)
-#elif _DEBUG
+
+#define SCOPED_NEW_BLOCK(Type, name) \
+    for (int _xxc_once = 1; _xxc_once; _xxc_once = 0) \
+        for (SCOPED Type *name = NEW(Type); _xxc_once; _xxc_once = 0)
+#else
 #define SCOPED_NEW(Type, name) \
-    assert(false); \
-    printf("Attempted to use scoped_new on MSVC in \"%s\", aborting...", __func__); \
-    exit(-1)
+    _Static_assert(0, "SCOPED_NEW needs __attribute__((cleanup)); use SCOPED_NEW_BLOCK(Type, name) { ... }")
+
+#define SCOPED_NEW_BLOCK(Type, name) \
+    for (int _xxc_once = 1; _xxc_once; _xxc_once = 0) \
+        for (Type *name = NEW(Type); _xxc_once; _xxc_once = 0, c_scoped_delete(&name))
 #endif
 
 #define IS_A(object, Type) \

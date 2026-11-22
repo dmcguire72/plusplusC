@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.25)
 project(plusplusc
     VERSION 0.1.0
     DESCRIPTION "++C"
-    LANGUAGES C ASM
+    LANGUAGES C
 )
 
 if (CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
@@ -14,9 +14,29 @@ if (NOT (WIN32 OR LINUX OR XXC_FREEBSD))
     message(FATAL_ERROR "++C only supports Linux, FreeBSD and Windows targets (got: ${CMAKE_SYSTEM_NAME})")
 endif()
 
+if (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
+    string(TOLOWER "${CMAKE_C_COMPILER_ARCHITECTURE_ID};${CMAKE_GENERATOR_PLATFORM};${CMAKE_SYSTEM_PROCESSOR}" _xxc_arch_probe)
+    if (_xxc_arch_probe MATCHES "arm64")
+        set(XXC_MSVC_ARCH arm64)
+    elseif (_xxc_arch_probe MATCHES "x64|amd64|x86_64")
+        set(XXC_MSVC_ARCH x64)
+    else()
+        set(XXC_MSVC_ARCH x86)
+    endif()
+    if (XXC_MSVC_ARCH STREQUAL "x64" OR XXC_MSVC_ARCH STREQUAL "x86")
+        enable_language(ASM_MASM)
+    elseif (XXC_MSVC_ARCH STREQUAL "arm64")
+        if (CMAKE_VERSION VERSION_LESS 3.26)
+            message(FATAL_ERROR "++C: building for ARM64 with cl.exe needs CMake >= 3.26 (ASM_MARMASM)")
+        endif()
+        enable_language(ASM_MARMASM)
+    endif()
+else()
+    enable_language(ASM)
+endif()
+
 set(CMAKE_C_STANDARD 23)
 set(CMAKE_C_STANDARD_REQUIRED ON)
-
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 option(XXC_BUILD_TEST "Build the ++C test executable" ${PROJECT_IS_TOP_LEVEL})

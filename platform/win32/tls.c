@@ -2,9 +2,13 @@
 // Copyright 2026 Daniel McGuire
 // Licensed under the MIT License
 
+#if defined(_MSC_VER) && !defined(__clang__)
+#include <windows.h>
+#else
 #define va_start vastart_guard
 #include <windows.h>
 #undef va_start
+#endif
 
 #include <def.h>
 
@@ -13,6 +17,7 @@
     #pragma section(".tls$ZZZ",   read, write)
     #pragma section(".CRT$XLA",   long, read)
     #pragma section(".CRT$XLZ",   long, read)
+    #pragma section(".rdata$T",   read)
     #define XXC_PE_SECTION(name) __declspec(allocate(name))
 #else
     #define XXC_PE_SECTION(name) __attribute__((section(name)))

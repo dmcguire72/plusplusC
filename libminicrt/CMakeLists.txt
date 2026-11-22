@@ -67,8 +67,18 @@ if (NOT TARGET minicrt)
     endif()
     xxc_freestanding_compile_options(minicrt_objects PUBLIC)
 
+    set(MINICRT_ASM_OBJECTS)
+    if (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
+        set(_xxc_chkstk_asm ${CMAKE_CURRENT_SOURCE_DIR}/src/msvc/chkstk_${XXC_MSVC_ARCH}.asm)
+        if (_xxc_chkstk_asm)
+            add_library(minicrt_asm OBJECT ${_xxc_chkstk_asm})
+            set(MINICRT_ASM_OBJECTS $<TARGET_OBJECTS:minicrt_asm>)
+        endif()
+    endif()
+
     add_library(minicrt STATIC
         $<TARGET_OBJECTS:minicrt_objects>
+        ${MINICRT_ASM_OBJECTS}
         ${CMAKE_CURRENT_SOURCE_DIR}/src/crt1.c
     )
     add_library(xxc::minicrt ALIAS minicrt)
@@ -76,6 +86,7 @@ if (NOT TARGET minicrt)
     set(MINICRT_TARGETS minicrt)
     add_library(minicrt_shared SHARED
         $<TARGET_OBJECTS:minicrt_objects>
+        ${MINICRT_ASM_OBJECTS}
         $<$<NOT:$<PLATFORM_ID:Windows>>:${CMAKE_CURRENT_SOURCE_DIR}/src/crt1.c>
     )
     set_target_properties(minicrt_shared PROPERTIES

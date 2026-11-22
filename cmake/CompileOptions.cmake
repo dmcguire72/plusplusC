@@ -2,11 +2,18 @@ function(xxc_freestanding_compile_options target visibility)
     if (WIN32)
         if (MSVC)
             target_compile_options(${target} ${visibility}
-                /O2
+                $<$<NOT:$<CONFIG:Debug>>:/O2>
+                $<$<CONFIG:Debug>:/Od>
                 /GS-
                 /guard:cf-
                 /d2CastGuard-
+                /Zl
             )
+
+            foreach(lang C CXX)
+                string(REGEX REPLACE "/RTC(su|[1su])" "" CMAKE_${lang}_FLAGS_DEBUG "${CMAKE_${lang}_FLAGS_DEBUG}")
+                set(CMAKE_${lang}_FLAGS_DEBUG "${CMAKE_${lang}_FLAGS_DEBUG}" PARENT_SCOPE)
+            endforeach()
         elseif (CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
             target_compile_options(${target} ${visibility}
                 -O3
@@ -60,13 +67,7 @@ function(xxc_freestanding_link_options target)
             target_link_options(${target} PRIVATE
                 /OPT:REF
                 /OPT:ICF
-                /GS-
-                /guard:cf-
-                /d2CastGuard-
-                /sdl-
-                /RTCc- /RTCs- /RTCu- /RTC1-
-                /Zl
-                /Gs9999999
+                /IGNORE:4210 # oh no, we arent using microslop's SpEcIaL cRt, who cares
             )
             if (NOT tgt_type STREQUAL "SHARED_LIBRARY")
                 target_link_options(${target} PRIVATE /ENTRY:start /SUBSYSTEM:CONSOLE)
