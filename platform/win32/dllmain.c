@@ -13,6 +13,8 @@
 #include <pe_initfini.h>
 
 extern void __xxc_ssp_init(void);
+extern void __xxc_emutls_thread_exit(void);
+extern void __xxc_heap_thread_exit(void);
 
 volatile int _fltused = 0;
 
@@ -36,6 +38,12 @@ XXC_NO_SSP BOOL WINAPI XXC_DLL_ENTRY(HINSTANCE hinst, DWORD reason, LPVOID reser
     {
         __xxc_ssp_init();
         xxc_pe_run_ctors();
+    }
+
+    if (reason == DLL_THREAD_DETACH)
+    {
+        __xxc_emutls_thread_exit();
+        __xxc_heap_thread_exit();
     }
 
     BOOL ok = DllMain(hinst, reason, reserved);

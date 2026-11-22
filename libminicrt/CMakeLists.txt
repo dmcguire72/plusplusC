@@ -32,6 +32,7 @@ if (NOT TARGET minicrt)
         ${CMAKE_CURRENT_SOURCE_DIR}/src/clock.c
         ${CMAKE_CURRENT_SOURCE_DIR}/include/clock.h
         $<$<PLATFORM_ID:Windows>:${CMAKE_CURRENT_SOURCE_DIR}/../platform/win32/emutls.c>
+        $<$<PLATFORM_ID:Windows>:${CMAKE_CURRENT_SOURCE_DIR}/../platform/shared/alloc.c>
 
         ${CMAKE_CURRENT_SOURCE_DIR}/src/dstr.c
         ${CMAKE_CURRENT_SOURCE_DIR}/include/dstr.h

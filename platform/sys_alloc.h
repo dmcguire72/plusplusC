@@ -6,7 +6,9 @@
 #define SYS_ALLOC_H
 
 #include <def.h>
+#if !defined(_WIN32)
 #include "xxc_sys.h"
+#endif
 
 void  *__xxc_malloc(size_t size);
 void  *__xxc_calloc(size_t count, size_t size);

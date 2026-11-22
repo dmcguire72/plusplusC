@@ -16,6 +16,7 @@
     #pragma section(".tls",       read, write)
     #pragma section(".tls$ZZZ",   read, write)
     #pragma section(".CRT$XLA",   long, read)
+    #pragma section(".CRT$XLB",   long, read)
     #pragma section(".CRT$XLZ",   long, read)
     #pragma section(".rdata$T",   read)
     #define XXC_PE_SECTION(name) __declspec(allocate(name))
@@ -29,6 +30,22 @@ XXC_PE_SECTION(".tls")     XXC_USED char _tls_start = 0;
 XXC_PE_SECTION(".tls$ZZZ") XXC_USED char _tls_end   = 0;
 
 XXC_PE_SECTION(".CRT$XLA") XXC_USED PIMAGE_TLS_CALLBACK __xl_a = 0;
+
+extern void __xxc_emutls_thread_exit(void);
+extern void __xxc_heap_thread_exit(void);
+
+static void NTAPI xxc_tls_callback(PVOID hmod, DWORD reason, PVOID reserved)
+{
+    (void)hmod;
+    (void)reserved;
+    if (reason == DLL_THREAD_DETACH)
+    {
+        __xxc_emutls_thread_exit();
+        __xxc_heap_thread_exit();
+    }
+}
+
+XXC_PE_SECTION(".CRT$XLB") XXC_USED PIMAGE_TLS_CALLBACK __xl_b = xxc_tls_callback;
 XXC_PE_SECTION(".CRT$XLZ") XXC_USED PIMAGE_TLS_CALLBACK __xl_z = 0;
 
 #if defined(_WIN64)

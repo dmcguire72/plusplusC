@@ -1,0 +1,153 @@
+// ++C Runtime Library
+// Copyright 2026 Daniel McGuire
+// Licensed under the MIT License
+
+#include <def.h>
+#include <cio.h>
+#include <str.h>
+#include <mem.h>
+#include <alloc.h>
+#include <atomic.h>
+#include <thread.h>
+#include <parr.h>
+#include <class.pph>
+#include <app.pph>
+
+CLASS(AllocMtTest, Application)
+{
+    BASE(Application)
+};
+
+CLASS_EXPORT(AllocMtTest);
+
+#define WORKERS      6
+#define WAVES        4
+#define RING_SLOTS   2048
+#define ITERATIONS   40000
+
+typedef struct { size_t size; u32 tag; u32 pad; } blk_hdr;
+
+static atomic_ptr_t g_ring[RING_SLOTS];
+static atomic_i32_t g_errors = ATOMIC_INIT(0);
+
+static size_t pick_size(u32 *r)
+{
+    *r = *r * 1664525u + 1013904223u;
+    u32 k = (*r >> 8) % 100;
+    if (k < 80) return 32 + ((*r >> 4) % 480);
+    if (k < 95) return 512 + ((*r >> 3) % 7600);
+    return 8200 + ((*r >> 2) % 200000);
+}
+
+static void *make_block(size_t n, u32 tag)
+{
+    unsigned char *p = (unsigned char *)malloc(n);
+    if (p == nullptr) return nullptr;
+    blk_hdr *h = (blk_hdr *)p;
+    h->size = n;
+    h->tag = tag;
+    memset(p + sizeof(*h), (int)(tag & 0xFF), n - sizeof(*h));
+    return p;
+}
+
+static void verify_and_free(void *p)
+{
+    unsigned char *c = (unsigned char *)p;
+    blk_hdr *h = (blk_hdr *)p;
+    size_t n = h->size;
+    unsigned char fill = (unsigned char)(h->tag & 0xFF);
+    if (malloc_usable_size(p) < n || c[sizeof(*h)] != fill || c[n - 1] != fill || c[n / 2] != fill)
+        atomic_i32_fetch_add(&g_errors, 1);
+    free(p);
+}
+
+static void *worker(void *arg)
+{
+    u32 id = (u32)(uintptr_t)arg;
+    u32 r = id * 2654435761u + 1;
+
+    for (int i = 0; i < ITERATIONS; i++)
+    {
+        size_t n = pick_size(&r);
+        void *p = make_block(n, id);
+        if (p == nullptr) { atomic_i32_fetch_add(&g_errors, 1); break; }
+
+        u32 slot = (r >> 5) % RING_SLOTS;
+        void *old = atomic_ptr_exchange(&g_ring[slot], p);
+        if (old) verify_and_free(old);
+
+        if ((i & 1023) == 0)
+        {
+            unsigned char *z = (unsigned char *)calloc(9, 111);
+            for (int k = 0; k < 999; k++) if (z[k]) { atomic_i32_fetch_add(&g_errors, 1); break; }
+            free(z);
+
+            unsigned char *g = (unsigned char *)malloc(40);
+            memset(g, 0x5A, 40);
+            g = (unsigned char *)realloc(g, 70000);
+            if (g[0] != 0x5A || g[39] != 0x5A) atomic_i32_fetch_add(&g_errors, 1);
+            g = (unsigned char *)realloc(g, 10);
+            if (g[0] != 0x5A || g[9] != 0x5A) atomic_i32_fetch_add(&g_errors, 1);
+            free(g);
+        }
+    }
+    return nullptr;
+}
+
+static void *short_lived(void *arg)
+{
+    (void)arg;
+    void *p[64];
+    for (int i = 0; i < 64; i++) p[i] = make_block(48 + (size_t)i * 8, 7);
+    for (int i = 0; i < 64; i++) verify_and_free(p[i]);
+    return nullptr;
+}
+
+int program(parr_t csArgs)
+{
+    (void)csArgs;
+
+    for (int wave = 0; wave < WAVES; wave++)
+    {
+        thread_t t[WORKERS];
+        for (int i = 0; i < WORKERS; i++)
+            if (thread_create(&t[i], worker, (void *)(uintptr_t)(1 + wave * WORKERS + i), nullptr) != THREAD_SUCCESS)
+            { puts("alloc_mt: thread_create failed", SIOOUT); return 1; }
+        for (int i = 0; i < WORKERS; i++)
+            thread_join(t[i], nullptr);
+    }
+
+    for (int i = 0; i < 1500; i++)
+    {
+        thread_t t;
+        if (thread_create(&t, short_lived, nullptr, nullptr) != THREAD_SUCCESS)
+        { puts("alloc_mt: thread_create failed", SIOOUT); return 1; }
+        thread_join(t, nullptr);
+    }
+
+    for (int i = 0; i < RING_SLOTS; i++)
+    {
+        void *p = atomic_ptr_exchange(&g_ring[i], nullptr);
+        if (p) verify_and_free(p);
+    }
+
+    if (atomic_i32_load(&g_errors) != 0)
+    {
+        printf("alloc_mt: FAILED (%d errors)\n", (int)atomic_i32_load(&g_errors));
+        return 1;
+    }
+
+    puts("alloc_mt: completed OK", SIOOUT);
+    return 0;
+}
+
+CLASS_INFO(AllocMtTest, Application);
+
+CONSTRUCTOR(AllocMtTest)
+{
+    SUPER_CTOR(self, Application);
+}
+DECONSTRUCTOR(AllocMtTest)
+{
+    SUPER_DTOR(self, Application);
+}

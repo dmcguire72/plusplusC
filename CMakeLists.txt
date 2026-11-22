@@ -107,6 +107,7 @@ if (XXC_BUILD_TEST)
 
     xxc_add_test(test         test/test.ppc)
     xxc_add_test(leak_test    test/leak.ppc)
+    xxc_add_test(alloc_mt_test test/alloc_mt.ppc)
     xxc_add_test(initfini_test test/initfini.ppc)
     xxc_add_test(stackframe_test test/stackframe.ppc)
 

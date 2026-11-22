@@ -1,4 +1,4 @@
-// ++C C Runtime Library (libminicrt) | Platform (Linux/FreeBSD)
+// ++C C Runtime Library (libminicrt) | Platform (Linux v2.4.0, FreeBSD v1.0-RELEASE, NT_x86 4.0+, NT_x64 5.2+)
 // Copyright 2026 Daniel McGuire
 // Licensed under the MIT License
 
@@ -58,6 +58,138 @@ typedef struct xxc_heap {
 _Static_assert(sizeof(xxc_page) <= XXC_PAGE_HDR, "page header too large");
 _Static_assert(sizeof(xxc_large) <= XXC_LARGE_HDR, "large header too large");
 
+#if defined(_MSC_VER) && !defined(__clang__)
+    #include <intrin.h>
+    #define XXC_TRAP() __fastfail(7)
+#else
+    #define XXC_TRAP() __builtin_trap()
+#endif
+
+static inline unsigned xxc_log2_u32(unsigned v)
+{
+#if defined(_MSC_VER) && !defined(__clang__)
+    unsigned long i;
+    _BitScanReverse(&i, v);
+    return (unsigned)i;
+#else
+    return 31u - (unsigned)__builtin_clz(v);
+#endif
+}
+
+#if defined(_WIN32)
+#include <windows.h>
+
+static void os_write_err(const char *msg, size_t n)
+{
+    DWORD w;
+    WriteFile(GetStdHandle(STD_ERROR_HANDLE), msg, (DWORD)n, &w, nullptr);
+}
+
+static inline char *os_map(size_t size)
+{
+    return (char *)VirtualAlloc(nullptr, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+}
+
+static inline char *os_map_aligned(size_t size)
+{
+    return os_map(size);
+}
+
+static inline void os_unmap(void *p, size_t size)
+{
+    (void)size;
+    VirtualFree(p, 0, MEM_RELEASE);
+}
+
+static inline void os_discard(void *p, size_t size)
+{
+    VirtualAlloc(p, size, MEM_RESET, PAGE_READWRITE);
+}
+
+#define XXC_TLS_SLOT_NONE  0xFFFFFFFFu
+#define XXC_TLS_SLOT_SLOW  0x80000000u
+#if defined(_WIN64)
+    #define XXC_TEB_TLSSLOTS 0x1480
+#else
+    #define XXC_TEB_TLSSLOTS 0x0E10
+#endif
+
+static atomic_u32_t g_tls_slot = ATOMIC_INIT(XXC_TLS_SLOT_NONE);
+
+static inline xxc_heap *t_heap_get(void)
+{
+    u32 s = atomic_u32_load_explicit(&g_tls_slot, ATOMIC_ACQUIRE);
+    if (XXC_UNLIKELY(s == XXC_TLS_SLOT_NONE)) return nullptr;
+    if (XXC_LIKELY(!(s & XXC_TLS_SLOT_SLOW)))
+        return ((xxc_heap **)((char *)NtCurrentTeb() + XXC_TEB_TLSSLOTS))[s];
+    DWORD err = GetLastError();
+    xxc_heap *h = (xxc_heap *)TlsGetValue(s & ~XXC_TLS_SLOT_SLOW);
+    SetLastError(err);
+    return h;
+}
+
+static bool t_heap_slot_init_locked(void)
+{
+    if (atomic_u32_load(&g_tls_slot) != XXC_TLS_SLOT_NONE) return true;
+    DWORD s = TlsAlloc();
+    if (s == TLS_OUT_OF_INDEXES) return false;
+
+    u32 v = s;
+    if (s < 64)
+    {
+        TlsSetValue(s, (LPVOID)(uintptr_t)0x58584331u);
+        if (((uintptr_t *)((char *)NtCurrentTeb() + XXC_TEB_TLSSLOTS))[s] != (uintptr_t)0x58584331u)
+            v = s | XXC_TLS_SLOT_SLOW;
+        TlsSetValue(s, nullptr);
+    }
+    else
+        v = s | XXC_TLS_SLOT_SLOW;
+    atomic_u32_store_explicit(&g_tls_slot, v, ATOMIC_RELEASE);
+    return true;
+}
+
+static inline void t_heap_set(xxc_heap *h)
+{
+    TlsSetValue(atomic_u32_load(&g_tls_slot) & ~XXC_TLS_SLOT_SLOW, h);
+}
+
+#else
+
+static __thread xxc_heap *t_heap;
+
+static inline xxc_heap *t_heap_get(void) { return t_heap; }
+static inline void      t_heap_set(xxc_heap *h) { t_heap = h; }
+static inline bool      t_heap_slot_init_locked(void) { return true; }
+
+static void os_write_err(const char *msg, size_t n)
+{
+    sys_write(2, msg, n);
+}
+
+static inline char *os_map(size_t size)
+{
+    return (char *)sys_mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+}
+
+static inline void os_unmap(void *p, size_t size)   { sys_munmap(p, size); }
+static inline void os_discard(void *p, size_t size) { sys_madvise(p, size, MADV_DONTNEED); }
+
+static char *os_map_aligned(size_t size)
+{
+    size_t total = size + XXC_PAGE_SIZE;
+    if (total < size) return nullptr;
+    char *raw = os_map(total);
+    if (raw == nullptr) return nullptr;
+
+    uintptr_t a = ((uintptr_t)raw + XXC_PAGE_SIZE - 1) & XXC_PAGE_MASK;
+    size_t head = a - (uintptr_t)raw;
+    size_t tail = total - head - size;
+    if (head) os_unmap(raw, head);
+    if (tail) os_unmap((char *)a + size, tail);
+    return (char *)a;
+}
+#endif
+
 static crt_lock_t   g_lock = CRT_LOCK_INIT;
 static xxc_heap    *g_idle_heaps;
 static xxc_page    *g_page_pool;
@@ -66,14 +198,12 @@ static char        *g_chunk_cur, *g_chunk_end;
 static char        *g_heap_cur,  *g_heap_end;
 static struct { char *base; size_t size; } g_large_cache[XXC_LARGE_SLOTS];
 
-static __thread xxc_heap *t_heap;
-
 static XXC_NORETURN void fatal(const char *msg)
 {
     size_t n = 0;
     while (msg[n]) n++;
-    sys_write(2, msg, n);
-    __builtin_trap();
+    os_write_err(msg, n);
+    XXC_TRAP();
 }
 
 static inline size_t align_up_sz(size_t v, size_t a) { return (v + a - 1) & ~(a - 1); }
@@ -84,7 +214,7 @@ static inline unsigned class_of(size_t size)
     if (size <= 128)
         return (unsigned)((size + 15) >> 4) - 1;
     unsigned s = (unsigned)size - 1;
-    unsigned m = 31u - (unsigned)__builtin_clz(s);
+    unsigned m = xxc_log2_u32(s);
     return 8 + (m - 7) * 4 + ((s >> (m - 2)) & 3);
 }
 
@@ -94,21 +224,6 @@ static inline u32 class_size(unsigned cls)
         return (cls + 1) * 16;
     unsigned k = cls - 8, m = 7 + k / 4, j = k % 4;
     return (1u << m) + ((1u << m) / 4) * (j + 1);
-}
-
-static char *os_map_aligned(size_t size)
-{
-    size_t total = size + XXC_PAGE_SIZE;
-    if (total < size) return nullptr;
-    char *raw = (char *)sys_mmap(nullptr, total, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-    if (raw == nullptr) return nullptr;
-
-    uintptr_t a = ((uintptr_t)raw + XXC_PAGE_SIZE - 1) & XXC_PAGE_MASK;
-    size_t head = a - (uintptr_t)raw;
-    size_t tail = total - head - size;
-    if (head) sys_munmap(raw, head);
-    if (tail) sys_munmap((char *)a + size, tail);
-    return (char *)a;
 }
 
 static xxc_page *pool_get_locked(void)
@@ -135,7 +250,7 @@ static xxc_page *pool_get_locked(void)
 static void pool_put_locked(xxc_page *p)
 {
     if (g_pool_count >= XXC_POOL_KEEP)
-        sys_madvise(p, XXC_PAGE_SIZE, MADV_DONTNEED);
+        os_discard(p, XXC_PAGE_SIZE);
     p->next = g_page_pool;
     g_page_pool = p;
     g_pool_count++;
@@ -146,7 +261,7 @@ static xxc_heap *heap_struct_new_locked(void)
     size_t sz = align_up_sz(sizeof(xxc_heap), XXC_CACHELINE);
     if ((size_t)(g_heap_end - g_heap_cur) < sz)
     {
-        char *m = (char *)sys_mmap(nullptr, XXC_PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+        char *m = os_map(XXC_PAGE_SIZE);
         if (m == nullptr) return nullptr;
         g_heap_cur = m;
         g_heap_end = m + XXC_PAGE_SIZE;
@@ -248,19 +363,25 @@ static xxc_page *page_new(xxc_heap *h, unsigned cls)
 static XXC_NOINLINE xxc_heap *heap_acquire(void)
 {
     __crt_lock_acquire(&g_lock);
-    xxc_heap *h = g_idle_heaps;
-    if (h != nullptr)
-        g_idle_heaps = h->next_idle;
-    else
-        h = heap_struct_new_locked();
-    if (h != nullptr)
-        atomic_u32_store(&h->idle, 0);
+    xxc_heap *h = nullptr;
+    if (t_heap_slot_init_locked())
+    {
+        h = g_idle_heaps;
+        if (h != nullptr)
+            g_idle_heaps = h->next_idle;
+        else
+            h = heap_struct_new_locked();
+        if (h != nullptr)
+            atomic_u32_store(&h->idle, 0);
+    }
     __crt_lock_release(&g_lock);
 
-    t_heap = h;
+    if (h != nullptr)
+        t_heap_set(h);
     return h;
 }
 
+#if !defined(_WIN32)
 void __xxc_heap_fork_prepare(void)
 {
     __crt_lock_acquire(&g_lock);
@@ -270,10 +391,11 @@ void __xxc_heap_fork_release(void)
 {
     __crt_lock_release(&g_lock);
 }
+#endif
 
 void __xxc_heap_thread_exit(void)
 {
-    xxc_heap *h = t_heap;
+    xxc_heap *h = t_heap_get();
     if (h == nullptr) return;
 
     heap_drain_delayed(h, false);
@@ -308,7 +430,7 @@ void __xxc_heap_thread_exit(void)
     atomic_u32_store(&h->idle, 1);
     __crt_lock_release(&g_lock);
 
-    t_heap = nullptr;
+    t_heap_set(nullptr);
 }
 
 static XXC_NOINLINE void *small_alloc_slow(xxc_heap *h, unsigned cls)
@@ -344,7 +466,7 @@ static XXC_NOINLINE void *small_alloc_slow(xxc_heap *h, unsigned cls)
 
 static inline void *small_alloc(size_t size)
 {
-    xxc_heap *h = t_heap;
+    xxc_heap *h = t_heap_get();
     if (XXC_UNLIKELY(h == nullptr))
     {
         h = heap_acquire();
@@ -448,7 +570,7 @@ static void large_free(xxc_large *L)
         }
         __crt_lock_release(&g_lock);
     }
-    sys_munmap(L, msize);
+    os_unmap(L, msize);
 }
 
 static inline void *alloc_impl(size_t size, bool *zeroed)
@@ -485,7 +607,7 @@ void __xxc_free(void *ptr)
     if (XXC_LIKELY(pg->magic == XXC_MAGIC_SMALL))
     {
         xxc_heap *h = pg->heap;
-        if (XXC_LIKELY(h == t_heap))
+        if (XXC_LIKELY(h == t_heap_get()))
             page_free_local(h, pg, (xxc_block *)ptr, false);
         else
             free_remote(h, (xxc_block *)ptr);

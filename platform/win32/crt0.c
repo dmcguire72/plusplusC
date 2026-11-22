@@ -20,8 +20,6 @@ extern int atexit(atexit_func_t func);
 extern void pluspluscBoot(int argc, char **argv);
 extern void __xxc_ssp_init(void);
 
-extern XXC_DYN_IMPORT HANDLE _xxc_w32_heap;
-
 int argc = 0;
 char **argv = nullptr;
 
@@ -35,7 +33,6 @@ void freeArgs(void)
 XXC_NORETURN void start(void)
 {
     __xxc_ssp_init();
-    _xxc_w32_heap = GetProcessHeap();
     argv = GetArgvA(&argc);
     atexit(freeArgs);
     pluspluscBoot(argc, argv);
