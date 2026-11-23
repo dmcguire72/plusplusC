@@ -65,10 +65,13 @@ function(xxc_freestanding_link_options target)
 
         if (MSVC)
             target_link_options(${target} PRIVATE
-                /OPT:REF
-                /OPT:ICF
+                $<$<NOT:$<CONFIG:Debug>>:/OPT:REF>
+                $<$<NOT:$<CONFIG:Debug>>:/OPT:ICF>
                 /IGNORE:4210 # oh no, we arent using microslop's SpEcIaL cRt, who cares
             )
+            if (tgt_type STREQUAL "SHARED_LIBRARY")
+                target_link_options(${target} PRIVATE /IGNORE:4216)
+            endif()
             if (NOT tgt_type STREQUAL "SHARED_LIBRARY")
                 target_link_options(${target} PRIVATE /ENTRY:start /SUBSYSTEM:CONSOLE)
             endif()

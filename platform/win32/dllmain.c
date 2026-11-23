@@ -5,9 +5,12 @@
 #if defined(_MSC_VER) && !defined(__clang__)
 #include <windows.h>
 #else
+#pragma push_macro("va_start")
+#undef va_start
 #define va_start vastart_guard
 #include <windows.h>
 #undef va_start
+#pragma pop_macro("va_start")
 #endif
 
 #include <pe_initfini.h>

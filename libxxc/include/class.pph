@@ -189,12 +189,22 @@ static inline int c_is_a(
 #define XXC_CLASS_WARNINGS_PUSH() \
     _Pragma("clang diagnostic push") \
     _Pragma("clang diagnostic ignored \"-Winconsistent-dllimport\"") \
-    _Pragma("clang diagnostic ignored \"-Wdll-attribute-on-redeclaration\"")
+    _Pragma("clang diagnostic ignored \"-Wdll-attribute-on-redeclaration\"") \
+    _Pragma("clang diagnostic ignored \"-Wignored-attributes\"")
 #define XXC_CLASS_WARNINGS_POP() \
     _Pragma("clang diagnostic pop")
+#define XXC_CLASS_ROOT_TAIL() ; XXC_CLASS_WARNINGS_POP()
+#elif defined(_MSC_VER)
+#define XXC_CLASS_WARNINGS_PUSH() \
+    __pragma(warning(push)) \
+    __pragma(warning(disable: 4273))
+#define XXC_CLASS_WARNINGS_POP() \
+    __pragma(warning(pop))
+#define XXC_CLASS_ROOT_TAIL() ; XXC_CLASS_WARNINGS_POP()
 #else
 #define XXC_CLASS_WARNINGS_PUSH()
 #define XXC_CLASS_WARNINGS_POP()
+#define XXC_CLASS_ROOT_TAIL()
 #endif
 
 #if defined(_WIN32) && defined(__MINGW32__) && defined(XXC_USING_SHARED_LIB) && !defined(XXC_BUILDING_SHARED_LIB)
@@ -209,6 +219,7 @@ static inline int c_is_a(
 #endif
 
 #define CLASS_INFO_ROOT(Type) \
+    XXC_CLASS_WARNINGS_PUSH() \
     XXC_CLASS_IMPORT_SLOT(Type) \
     XXC_DYN_EXPORT Class Type##__Class = { \
         .name = #Type, \
@@ -217,7 +228,7 @@ static inline int c_is_a(
         .constructor = (C_Constructor)Type##__ctor, \
         .destructor = (C_Destructor)Type##__dctor, \
         .init = nullptr \
-    }
+    } XXC_CLASS_ROOT_TAIL()
 
 
 #define CLASS_INFO(Type, parent_type) \

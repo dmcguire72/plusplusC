@@ -140,7 +140,7 @@ static bool test_formatting(void)
     snprintf(buf, sizeof(buf), "%d %x", 255, 255);
     ASSERT_STR_EQ(buf, "255 ff");
     
-    snprintf(buf, sizeof(buf), "[%s] %p", "test", (void*)0xDEADBEEF);
+    snprintf(buf, sizeof(buf), "[%s] %p", "test", (void*)(uintptr_t)0xDEADBEEFu);
     ASSERT(buf[0] == '[' && buf[1] == 't' && buf[2] == 'e'); 
 
     snprintf(buf, sizeof(buf), "%04d", 42);

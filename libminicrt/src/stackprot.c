@@ -48,9 +48,12 @@ XXC_USED uintptr_t __security_cookie = (uintptr_t)0xBB40E64Eu;
 #if defined(_MSC_VER) && !defined(__clang__)
 #include <windows.h>
 #else
+#pragma push_macro("va_start")
+#undef va_start
 #define va_start vastart_guard
 #include <windows.h>
 #undef va_start
+#pragma pop_macro("va_start")
 #endif
 
 #include <bcrypt.h>
