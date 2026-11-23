@@ -197,7 +197,19 @@ static inline int c_is_a(
 #define XXC_CLASS_WARNINGS_POP()
 #endif
 
+#if defined(_WIN32) && defined(__MINGW32__) && defined(XXC_USING_SHARED_LIB) && !defined(XXC_BUILDING_SHARED_LIB)
+    #define XXC_STR_(x) #x
+    #define XXC_STR(x)  XXC_STR_(x)
+    #define XXC_CLASS_IMPORT_SLOT(Type) \
+        extern Class Type##__Class_self __asm__(XXC_STR(__USER_LABEL_PREFIX__) #Type "__Class"); \
+        XXC_USED Class *const Type##__Class_imp \
+            __asm__("__imp_" XXC_STR(__USER_LABEL_PREFIX__) #Type "__Class") = &Type##__Class_self;
+#else
+    #define XXC_CLASS_IMPORT_SLOT(Type)
+#endif
+
 #define CLASS_INFO_ROOT(Type) \
+    XXC_CLASS_IMPORT_SLOT(Type) \
     XXC_DYN_EXPORT Class Type##__Class = { \
         .name = #Type, \
         .parent = nullptr, \
@@ -212,6 +224,7 @@ static inline int c_is_a(
     XXC_CLASS_WARNINGS_PUSH() \
     XXC_CLASS_DECL(parent_type) \
     extern XXC_DYN_EXPORT Class Type##__Class; \
+    XXC_CLASS_IMPORT_SLOT(Type) \
     static void Type##__Class_init(void) { \
         if (Type##__Class.parent == nullptr) \
             Type##__Class.parent = &parent_type##__Class; \

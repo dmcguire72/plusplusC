@@ -44,9 +44,13 @@ typedef struct xxc_large {
     u32                 magic;
     u32                 pad;
     size_t              map_size;
+    size_t              reserve_size;
 } xxc_large;
 
+struct xxc_arena;
+
 typedef struct xxc_heap {
+    struct xxc_arena   *arena;
     xxc_page           *pages[XXC_NUM_CLASSES];
     xxc_page           *spare;
     u32                 nspare;
@@ -54,6 +58,16 @@ typedef struct xxc_heap {
     _Alignas(XXC_CACHELINE) atomic_ptr_t delayed;
     atomic_u32_t        idle;
 } xxc_heap;
+
+typedef struct xxc_arena {
+    crt_lock_t          lock;
+    xxc_heap           *idle_heaps;
+    xxc_page           *page_pool;
+    size_t              pool_count;
+    char               *chunk_cur, *chunk_end;
+    char               *heap_cur,  *heap_end;
+    struct { char *base; size_t size; size_t reserve; } large_cache[XXC_LARGE_SLOTS];
+} xxc_arena;
 
 _Static_assert(sizeof(xxc_page) <= XXC_PAGE_HDR, "page header too large");
 _Static_assert(sizeof(xxc_large) <= XXC_LARGE_HDR, "large header too large");
@@ -104,6 +118,42 @@ static inline void os_unmap(void *p, size_t size)
 static inline void os_discard(void *p, size_t size)
 {
     VirtualAlloc(p, size, MEM_RESET, PAGE_READWRITE);
+}
+
+#define XXC_LARGE_HEADROOM_MIN ((size_t)1 << 20)
+
+static char *os_map_large(size_t need, size_t *reserve_out)
+{
+#if defined(_WIN64)
+    if (need >= XXC_LARGE_HEADROOM_MIN)
+    {
+        size_t rsv = need * 2;
+        char *b = (char *)VirtualAlloc(nullptr, rsv, MEM_RESERVE, PAGE_READWRITE);
+        if (b != nullptr)
+        {
+            if (VirtualAlloc(b, need, MEM_COMMIT, PAGE_READWRITE) != nullptr)
+            {
+                *reserve_out = rsv;
+                return b;
+            }
+            VirtualFree(b, 0, MEM_RELEASE);
+            return nullptr;
+        }
+    }
+#endif
+    char *b = os_map(need);
+    if (b != nullptr) *reserve_out = need;
+    return b;
+}
+
+static bool os_large_grow(xxc_large *L, size_t need)
+{
+    if (need <= L->map_size) return true;
+    if (need > L->reserve_size) return false;
+    if (VirtualAlloc((char *)L + L->map_size, need - L->map_size, MEM_COMMIT, PAGE_READWRITE) == nullptr)
+        return false;
+    L->map_size = need;
+    return true;
 }
 
 #define XXC_TLS_SLOT_NONE  0xFFFFFFFFu
@@ -188,15 +238,42 @@ static char *os_map_aligned(size_t size)
     if (tail) os_unmap((char *)a + size, tail);
     return (char *)a;
 }
+
+static inline char *os_map_large(size_t need, size_t *reserve_out)
+{
+    *reserve_out = need;
+    return os_map_aligned(need);
+}
+
+static inline bool os_large_grow(xxc_large *L, size_t need)
+{
+    (void)L; (void)need;
+    return false;
+}
 #endif
 
-static crt_lock_t   g_lock = CRT_LOCK_INIT;
-static xxc_heap    *g_idle_heaps;
-static xxc_page    *g_page_pool;
-static size_t       g_pool_count;
-static char        *g_chunk_cur, *g_chunk_end;
-static char        *g_heap_cur,  *g_heap_end;
-static struct { char *base; size_t size; } g_large_cache[XXC_LARGE_SLOTS];
+#if defined(_WIN32)
+static atomic_ptr_t g_arena_ptr = ATOMIC_INIT(nullptr);
+
+static xxc_arena *arena_get(void)
+{
+    xxc_arena *a = (xxc_arena *)atomic_ptr_load_explicit(&g_arena_ptr, ATOMIC_ACQUIRE);
+    if (XXC_LIKELY(a != nullptr)) return a;
+
+    _Static_assert(sizeof(xxc_arena) <= XXC_PAGE_SIZE, "arena must fit in one mapping");
+    xxc_arena *fresh = (xxc_arena *)os_map(XXC_PAGE_SIZE);
+    if (fresh == nullptr) return nullptr;
+
+    void *expected = nullptr;
+    if (atomic_ptr_cas(&g_arena_ptr, &expected, fresh))
+        return fresh;
+    os_unmap(fresh, XXC_PAGE_SIZE);
+    return (xxc_arena *)expected;
+}
+#else
+static xxc_arena g_arena_storage;
+static inline xxc_arena *arena_get(void) { return &g_arena_storage; }
+#endif
 
 static XXC_NORETURN void fatal(const char *msg)
 {
@@ -226,48 +303,49 @@ static inline u32 class_size(unsigned cls)
     return (1u << m) + ((1u << m) / 4) * (j + 1);
 }
 
-static xxc_page *pool_get_locked(void)
+static xxc_page *pool_get_locked(xxc_arena *a)
 {
-    xxc_page *p = g_page_pool;
+    xxc_page *p = a->page_pool;
     if (p != nullptr)
     {
-        g_page_pool = p->next;
-        g_pool_count--;
+        a->page_pool = p->next;
+        a->pool_count--;
         return p;
     }
-    if (g_chunk_cur == g_chunk_end)
+    if (a->chunk_cur == a->chunk_end)
     {
         char *c = os_map_aligned(XXC_CHUNK_PAGES * XXC_PAGE_SIZE);
         if (c == nullptr) return nullptr;
-        g_chunk_cur = c;
-        g_chunk_end = c + XXC_CHUNK_PAGES * XXC_PAGE_SIZE;
+        a->chunk_cur = c;
+        a->chunk_end = c + XXC_CHUNK_PAGES * XXC_PAGE_SIZE;
     }
-    p = (xxc_page *)g_chunk_cur;
-    g_chunk_cur += XXC_PAGE_SIZE;
+    p = (xxc_page *)a->chunk_cur;
+    a->chunk_cur += XXC_PAGE_SIZE;
     return p;
 }
 
-static void pool_put_locked(xxc_page *p)
+static void pool_put_locked(xxc_arena *a, xxc_page *p)
 {
-    if (g_pool_count >= XXC_POOL_KEEP)
+    if (a->pool_count >= XXC_POOL_KEEP)
         os_discard(p, XXC_PAGE_SIZE);
-    p->next = g_page_pool;
-    g_page_pool = p;
-    g_pool_count++;
+    p->next = a->page_pool;
+    a->page_pool = p;
+    a->pool_count++;
 }
 
-static xxc_heap *heap_struct_new_locked(void)
+static xxc_heap *heap_struct_new_locked(xxc_arena *a)
 {
     size_t sz = align_up_sz(sizeof(xxc_heap), XXC_CACHELINE);
-    if ((size_t)(g_heap_end - g_heap_cur) < sz)
+    if ((size_t)(a->heap_end - a->heap_cur) < sz)
     {
         char *m = os_map(XXC_PAGE_SIZE);
         if (m == nullptr) return nullptr;
-        g_heap_cur = m;
-        g_heap_end = m + XXC_PAGE_SIZE;
+        a->heap_cur = m;
+        a->heap_end = m + XXC_PAGE_SIZE;
     }
-    xxc_heap *h = (xxc_heap *)g_heap_cur;
-    g_heap_cur += sz;
+    xxc_heap *h = (xxc_heap *)a->heap_cur;
+    a->heap_cur += sz;
+    h->arena = a;
     return h;
 }
 
@@ -292,7 +370,8 @@ static void page_maybe_retire(xxc_heap *h, xxc_page *pg, bool locked)
         return;
     list_unlink(h, pg);
 
-    if (locked) { pool_put_locked(pg); return; }
+    xxc_arena *a = h->arena;
+    if (locked) { pool_put_locked(a, pg); return; }
     if (h->nspare < XXC_SPARE_MAX)
     {
         pg->next = h->spare;
@@ -300,9 +379,9 @@ static void page_maybe_retire(xxc_heap *h, xxc_page *pg, bool locked)
         h->nspare++;
         return;
     }
-    __crt_lock_acquire(&g_lock);
-    pool_put_locked(pg);
-    __crt_lock_release(&g_lock);
+    __crt_lock_acquire(&a->lock);
+    pool_put_locked(a, pg);
+    __crt_lock_release(&a->lock);
 }
 
 static inline void page_free_local(xxc_heap *h, xxc_page *pg, xxc_block *b, bool locked)
@@ -342,9 +421,10 @@ static xxc_page *page_new(xxc_heap *h, unsigned cls)
     }
     else
     {
-        __crt_lock_acquire(&g_lock);
-        pg = pool_get_locked();
-        __crt_lock_release(&g_lock);
+        xxc_arena *a = h->arena;
+        __crt_lock_acquire(&a->lock);
+        pg = pool_get_locked(a);
+        __crt_lock_release(&a->lock);
         if (pg == nullptr) return nullptr;
     }
     pg->magic      = XXC_MAGIC_SMALL;
@@ -362,19 +442,22 @@ static xxc_page *page_new(xxc_heap *h, unsigned cls)
 
 static XXC_NOINLINE xxc_heap *heap_acquire(void)
 {
-    __crt_lock_acquire(&g_lock);
+    xxc_arena *a = arena_get();
+    if (a == nullptr) return nullptr;
+
+    __crt_lock_acquire(&a->lock);
     xxc_heap *h = nullptr;
     if (t_heap_slot_init_locked())
     {
-        h = g_idle_heaps;
+        h = a->idle_heaps;
         if (h != nullptr)
-            g_idle_heaps = h->next_idle;
+            a->idle_heaps = h->next_idle;
         else
-            h = heap_struct_new_locked();
+            h = heap_struct_new_locked(a);
         if (h != nullptr)
             atomic_u32_store(&h->idle, 0);
     }
-    __crt_lock_release(&g_lock);
+    __crt_lock_release(&a->lock);
 
     if (h != nullptr)
         t_heap_set(h);
@@ -384,12 +467,12 @@ static XXC_NOINLINE xxc_heap *heap_acquire(void)
 #if !defined(_WIN32)
 void __xxc_heap_fork_prepare(void)
 {
-    __crt_lock_acquire(&g_lock);
+    __crt_lock_acquire(&arena_get()->lock);
 }
 
 void __xxc_heap_fork_release(void)
 {
-    __crt_lock_release(&g_lock);
+    __crt_lock_release(&arena_get()->lock);
 }
 #endif
 
@@ -398,6 +481,7 @@ void __xxc_heap_thread_exit(void)
     xxc_heap *h = t_heap_get();
     if (h == nullptr) return;
 
+    xxc_arena *a = h->arena;
     heap_drain_delayed(h, false);
 
     for (unsigned c = 0; c < XXC_NUM_CLASSES; c++)
@@ -409,26 +493,26 @@ void __xxc_heap_thread_exit(void)
             if (pg->used == 0)
             {
                 list_unlink(h, pg);
-                __crt_lock_acquire(&g_lock);
-                pool_put_locked(pg);
-                __crt_lock_release(&g_lock);
+                __crt_lock_acquire(&a->lock);
+                pool_put_locked(a, pg);
+                __crt_lock_release(&a->lock);
             }
             pg = next;
         }
     }
 
-    __crt_lock_acquire(&g_lock);
+    __crt_lock_acquire(&a->lock);
     while (h->spare)
     {
         xxc_page *pg = h->spare;
         h->spare = pg->next;
-        pool_put_locked(pg);
+        pool_put_locked(a, pg);
     }
     h->nspare = 0;
-    h->next_idle = g_idle_heaps;
-    g_idle_heaps = h;
+    h->next_idle = a->idle_heaps;
+    a->idle_heaps = h;
     atomic_u32_store(&h->idle, 1);
-    __crt_lock_release(&g_lock);
+    __crt_lock_release(&a->lock);
 
     t_heap_set(nullptr);
 }
@@ -491,15 +575,16 @@ static void free_remote(xxc_heap *h, xxc_block *b)
 {
     if (XXC_UNLIKELY(atomic_u32_load_explicit(&h->idle, ATOMIC_ACQUIRE)))
     {
-        __crt_lock_acquire(&g_lock);
+        xxc_arena *a = h->arena;
+        __crt_lock_acquire(&a->lock);
         if (atomic_u32_load(&h->idle))
         {
             heap_drain_delayed(h, true);
             page_free_local(h, page_of(b), b, true);
-            __crt_lock_release(&g_lock);
+            __crt_lock_release(&a->lock);
             return;
         }
-        __crt_lock_release(&g_lock);
+        __crt_lock_release(&a->lock);
     }
 
     void *old = atomic_ptr_load_explicit(&h->delayed, ATOMIC_RELAXED);
@@ -512,25 +597,30 @@ static void *large_alloc(size_t size, bool *zeroed)
 {
     if (size > XXC_MAX_REQUEST) return nullptr;
     size_t need = align_up_sz(size + XXC_LARGE_HDR, XXC_PAGE_SIZE);
+    xxc_arena *a = arena_get();
 
     char *base = nullptr;
-    size_t msize = 0;
+    size_t msize = 0, rsize = 0;
 
-    __crt_lock_acquire(&g_lock);
-    int best = -1;
-    for (int i = 0; i < XXC_LARGE_SLOTS; i++)
+    if (a != nullptr)
     {
-        size_t s = g_large_cache[i].size;
-        if (g_large_cache[i].base && s >= need && s <= need * 2 && (best < 0 || s < g_large_cache[best].size))
-            best = i;
+        __crt_lock_acquire(&a->lock);
+        int best = -1;
+        for (int i = 0; i < XXC_LARGE_SLOTS; i++)
+        {
+            size_t s = a->large_cache[i].size;
+            if (a->large_cache[i].base && s >= need && s <= need * 2 && (best < 0 || s < a->large_cache[best].size))
+                best = i;
+        }
+        if (best >= 0)
+        {
+            base = a->large_cache[best].base;
+            msize = a->large_cache[best].size;
+            rsize = a->large_cache[best].reserve;
+            a->large_cache[best].base = nullptr;
+        }
+        __crt_lock_release(&a->lock);
     }
-    if (best >= 0)
-    {
-        base = g_large_cache[best].base;
-        msize = g_large_cache[best].size;
-        g_large_cache[best].base = nullptr;
-    }
-    __crt_lock_release(&g_lock);
 
     if (base != nullptr)
     {
@@ -538,7 +628,7 @@ static void *large_alloc(size_t size, bool *zeroed)
     }
     else
     {
-        base = os_map_aligned(need);
+        base = os_map_large(need, &rsize);
         if (base == nullptr) return nullptr;
         msize = need;
         if (zeroed) *zeroed = true;
@@ -547,30 +637,36 @@ static void *large_alloc(size_t size, bool *zeroed)
     xxc_large *L = (xxc_large *)base;
     L->magic = XXC_MAGIC_LARGE;
     L->map_size = msize;
+    L->reserve_size = rsize;
     return base + XXC_LARGE_HDR;
 }
 
 static void large_free(xxc_large *L)
 {
-    size_t msize = L->map_size;
+    size_t msize = L->map_size, rsize = L->reserve_size;
     L->magic = 0;
 
     if (msize <= XXC_LARGE_CACHE_MAX_ITEM)
     {
-        __crt_lock_acquire(&g_lock);
-        for (int i = 0; i < XXC_LARGE_SLOTS; i++)
+        xxc_arena *a = arena_get();
+        if (a != nullptr)
         {
-            if (g_large_cache[i].base == nullptr)
+            __crt_lock_acquire(&a->lock);
+            for (int i = 0; i < XXC_LARGE_SLOTS; i++)
             {
-                g_large_cache[i].base = (char *)L;
-                g_large_cache[i].size = msize;
-                __crt_lock_release(&g_lock);
-                return;
+                if (a->large_cache[i].base == nullptr)
+                {
+                    a->large_cache[i].base = (char *)L;
+                    a->large_cache[i].size = msize;
+                    a->large_cache[i].reserve = rsize;
+                    __crt_lock_release(&a->lock);
+                    return;
+                }
             }
+            __crt_lock_release(&a->lock);
         }
-        __crt_lock_release(&g_lock);
     }
-    os_unmap(L, msize);
+    os_unmap(L, rsize);
 }
 
 static inline void *alloc_impl(size_t size, bool *zeroed)
@@ -642,6 +738,14 @@ void *__xxc_realloc(void *ptr, size_t size)
     size_t usable = __xxc_usable_size(ptr);
     if (size <= usable && size >= usable / 2)
         return ptr;
+
+    if (size > usable && size <= XXC_MAX_REQUEST)
+    {
+        xxc_page *pg = page_of(ptr);
+        if (pg->magic == XXC_MAGIC_LARGE &&
+            os_large_grow((xxc_large *)pg, align_up_sz(size + XXC_LARGE_HDR, XXC_PAGE_SIZE)))
+            return ptr;
+    }
 
     void *n = __xxc_malloc(size);
     if (n == nullptr) return nullptr;
