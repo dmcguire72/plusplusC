@@ -285,6 +285,7 @@ static inline const char *http__map_get(Map *m, const char *key)
     return m ? (const char *)map_get_cstr(&m->table, key) : nullptr;
 }
 
+sock_t conn_sock_fd(const HTTPConnection *c);
 void conn_set_rcv(HTTPConnection *c, u32 want_ms);
 i64 conn_read_raw(HTTPConnection *c, void *dst, size_t n);
 bool conn_make_room(HTTPConnection *c, size_t limit);

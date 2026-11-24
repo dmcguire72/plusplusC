@@ -52,7 +52,7 @@ function(xxc_freestanding_link_options target)
     endif()
 
     if (WIN32)
-        target_link_libraries(${target} PRIVATE kernel32 ws2_32 bcrypt)
+        target_link_libraries(${target} PRIVATE kernel32 shell32 ws2_32 bcrypt)
         if (MSVC OR CMAKE_C_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
             target_link_options(${target} PRIVATE
                 "LINKER:/NODEFAULTLIB:msvcrt"

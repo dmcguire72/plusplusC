@@ -107,8 +107,21 @@ Map *http__new_string_map(void)
     return m;
 }
 
+sock_t conn_sock_fd(const HTTPConnection *c)
+{
+    if (c == nullptr || c->stream == nullptr)
+        return SOCK_INVALID;
+
+    SocketStream *ss = AS(SocketStream, c->stream);
+    return ss != nullptr ? ss->fd : SOCK_INVALID;
+}
+
 void conn_set_rcv(HTTPConnection *c, u32 want_ms)
 {
+    sock_t fd = conn_sock_fd(c);
+    if (fd == SOCK_INVALID)
+        return;
+
     u32 cur = c->rcv_timeout_ms;
 
     if (cur != HTTP_RCV_UNKNOWN && cur >= want_ms && cur - want_ms < 25u)
@@ -116,7 +129,7 @@ void conn_set_rcv(HTTPConnection *c, u32 want_ms)
     if (cur == want_ms)
         return;
 
-    sock_set_recv_timeout(((SocketStream *)c->stream)->fd, want_ms);
+    sock_set_recv_timeout(fd, want_ms);
     c->rcv_timeout_ms = want_ms;
 }
 
@@ -170,11 +183,14 @@ i64 conn_read_raw(HTTPConnection *c, void *dst, size_t n)
             return 0;
         }
 
-        if (sock_timed_out(((SocketStream *)c->stream)->fd) && (c->deadline_ms != 0 || c->cancel != nullptr))
+        sock_t fd = conn_sock_fd(c);
+        bool timed_out = (fd != SOCK_INVALID) && sock_timed_out(fd);
+
+        if (timed_out && (c->deadline_ms != 0 || c->cancel != nullptr))
             continue;
 
         c->io_error = true;
-        if (sock_timed_out(((SocketStream *)c->stream)->fd))
+        if (timed_out)
             c->timed_out = true;
         return -1;
     }

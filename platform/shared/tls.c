@@ -326,7 +326,7 @@ size_t __xxc_exe_dyn_array(int which, int argc, char **argv, void ***out)
 {
     /* GCOV_EXCL_START */
     *out = nullptr;
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
     static const long tag_arr[3] = { DT_PREINIT_ARRAY,   DT_INIT_ARRAY,   DT_FINI_ARRAY   };
     static const long tag_sz[3]  = { DT_PREINIT_ARRAYSZ, DT_INIT_ARRAYSZ, DT_FINI_ARRAYSZ };
 

@@ -501,7 +501,9 @@ static void lingering_close(HTTPConnection *c)
     if (c->stream == nullptr)
         return;
 
-    sock_shutdown_write(((SocketStream *)c->stream)->fd);
+    sock_t fd = conn_sock_fd(c);
+    if (fd != SOCK_INVALID)
+        sock_shutdown_write(fd);
     CALL(c, set_deadline, clock_monotonic_ms() + 500);
 
     size_t drained = 0;

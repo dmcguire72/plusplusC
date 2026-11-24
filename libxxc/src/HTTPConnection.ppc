@@ -68,7 +68,9 @@ IMPLEMENT(HTTPConnection, bool, connect, (void *self, const char *host, u16 port
         return false;
 
     conn_reset(this);
-    sock_set_nodelay(((SocketStream *)this->stream)->fd, true);
+    sock_t fd = conn_sock_fd(this);
+    if (fd != SOCK_INVALID)
+        sock_set_nodelay(fd, true);
     return true;
 }
 
@@ -111,7 +113,8 @@ IMPLEMENT(HTTPConnection, bool, write_all, (void *self, const void *buf, size_t 
         if (w <= 0)
         {
             this->io_error = true;
-            if (sock_timed_out(((SocketStream *)this->stream)->fd))
+            sock_t fd = conn_sock_fd(this);
+            if (fd != SOCK_INVALID && sock_timed_out(fd))
                 this->timed_out = true;
             return false;
         }

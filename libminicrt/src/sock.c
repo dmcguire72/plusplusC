@@ -13,7 +13,12 @@
 #if defined(__linux__)
 #define SOCK_SO_RCVTIMEO 20
 #define SOCK_SO_SNDTIMEO 21
+#elif defined(__FreeBSD__)
+#define SOCK_SO_SNDTIMEO 0x1005
+#define SOCK_SO_RCVTIMEO 0x1006
+#endif
 
+#if defined(__linux__) || defined(__FreeBSD__)
 struct timeval {
     long tv_sec;
     long tv_usec;
@@ -734,8 +739,7 @@ bool sock_set_send_timeout(sock_t s, u32 ms)
 bool sock_timed_out(sock_t s)
 {
     (void)s;
-    i32 err = sock_last_error();
-    return err == 110;
+    return sock_error_is_timeout(sock_last_error());
 }
 
 u16 sock_local_port(sock_t s)
@@ -761,17 +765,19 @@ void sock_listener_interrupt(sock_t s)
 
 bool sock_error_is_exhausted(i32 err)
 {
-    return err == 12;
+    return err == XXC_ENOMEM;
 }
 
 bool sock_error_is_timeout(i32 err)
 {
-    return err == 110;
+    /* SO_RCVTIMEO/SO_SNDTIMEO expiry on blocking sockets reports
+       EAGAIN/EWOULDBLOCK; ETIMEDOUT covers connect/keepalive timeouts. */
+    return err == XXC_EAGAIN || err == XXC_ETIMEDOUT;
 }
 
 bool sock_error_is_interrupted(i32 err)
 {
-    return err == 4;
+    return err == XXC_EINTR;
 }
 
 #else

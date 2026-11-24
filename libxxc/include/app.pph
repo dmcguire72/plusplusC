@@ -27,7 +27,6 @@ CLASS(Application)
 CLASS_EXPORT(Application);
 
 METHOD_PROTO(Application, void, configure_args, (void *self));
-METHOD_PROTO(Application, void, configure_args, (void *self));
 METHOD_PROTO(Application, int, run, (void *self));
 METHOD_PROTO(Application, void, parse_args, (void *self, const parr_t *argv));
 METHOD_PROTO(Application, void, print_help, (void *self));
